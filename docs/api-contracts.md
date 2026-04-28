@@ -59,7 +59,7 @@ Response:
 
 ```json
 {
-  "mode": "round_robin"
+  "mode": "least_connections"
 }
 ```
 
@@ -78,7 +78,8 @@ Response:
 ```json
 {
   "status": "updated",
-  "mode": "least_connections"
+  "mode": "least_connections",
+  "policy_version": 2
 }
 ```
 
@@ -235,7 +236,47 @@ Response:
 
 ```json
 {
-  "status": "collected"
+  "status": "collector_runs_automatically"
+}
+```
+
+### `GET /snapshot`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-04-28T20:00:00Z",
+  "gateways": [
+    {
+      "gateway_url": "http://gateway:8001",
+      "healthy": true,
+      "mode": "least_connections",
+      "policy_source": "orchestrator",
+      "policy_version": 2,
+      "worker_inflight": {
+        "worker-a:8000": 1,
+        "worker-b:8000": 0
+      }
+    }
+  ],
+  "workers": [
+    {
+      "worker_url": "http://worker-a:8000",
+      "worker_id": "worker-a",
+      "healthy": true,
+      "inflight_requests": 1,
+      "queue_depth": 0,
+      "load_score": 6.2,
+      "artificial_delay_ms": 500
+    }
+  ],
+  "summary": {
+    "healthy_gateways": 1,
+    "healthy_workers": 2,
+    "total_worker_inflight": 1,
+    "max_worker_load_score": 6.2
+  }
 }
 ```
 

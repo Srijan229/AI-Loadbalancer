@@ -22,6 +22,11 @@ class ModeUpdateRequest(BaseModel):
     mode: str
 
 
+class OrchestratorPolicy(BaseModel):
+    mode: str
+    version: int
+
+
 SUPPORTED_MODES = {"round_robin", "least_connections"}
 
 
@@ -78,10 +83,14 @@ class GatewayState:
     def __init__(self) -> None:
         self.mode = "round_robin"
         self.worker_urls = self._load_worker_urls()
+        self.orchestrator_url = os.getenv("ORCHESTRATOR_URL", "").strip().rstrip("/")
         self.next_index = 0
         self.lock = asyncio.Lock()
         self.client: Optional[httpx.AsyncClient] = None
         self.worker_inflight = {worker_url: 0 for worker_url in self.worker_urls}
+        self.policy_version = 0
+        self.policy_source = "local"
+        self.policy_task: Optional[asyncio.Task] = None
 
     @staticmethod
     def _load_worker_urls() -> list[str]:
@@ -127,11 +136,24 @@ class GatewayState:
     async def set_mode(self, mode: str) -> None:
         async with self.lock:
             self.mode = mode
+            self.policy_source = "local"
+            self.policy_version += 1
+
+    async def apply_orchestrator_policy(self, policy: OrchestratorPolicy) -> None:
+        if policy.mode not in SUPPORTED_MODES:
+            return
+        async with self.lock:
+            self.mode = policy.mode
+            self.policy_version = policy.version
+            self.policy_source = "orchestrator"
 
     async def health_snapshot(self) -> dict:
         async with self.lock:
             return {
                 "mode": self.mode,
+                "policy_source": self.policy_source,
+                "policy_version": self.policy_version,
+                "orchestrator_url": self.orchestrator_url or None,
                 "configured_workers": self.worker_urls,
                 "worker_inflight": {
                     _worker_label_from_url(worker_url): inflight
@@ -143,15 +165,38 @@ class GatewayState:
 gateway_state = GatewayState()
 
 
+async def _policy_refresh_loop() -> None:
+    while True:
+        if gateway_state.client is not None and gateway_state.orchestrator_url:
+            try:
+                response = await gateway_state.client.get(f"{gateway_state.orchestrator_url}/policy")
+                response.raise_for_status()
+                await gateway_state.apply_orchestrator_policy(
+                    OrchestratorPolicy.model_validate(response.json())
+                )
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     GATEWAY_WORKER_COUNT.set(len(gateway_state.worker_urls))
     for worker_url in gateway_state.worker_urls:
         GATEWAY_WORKER_INFLIGHT.labels(_worker_label_from_url(worker_url)).set(0)
     gateway_state.client = httpx.AsyncClient(timeout=10.0)
+    if gateway_state.orchestrator_url:
+        gateway_state.policy_task = asyncio.create_task(_policy_refresh_loop())
     try:
         yield
     finally:
+        if gateway_state.policy_task is not None:
+            gateway_state.policy_task.cancel()
+            try:
+                await gateway_state.policy_task
+            except asyncio.CancelledError:
+                pass
+            gateway_state.policy_task = None
         if gateway_state.client is not None:
             await gateway_state.client.aclose()
             gateway_state.client = None
@@ -185,6 +230,11 @@ async def set_mode(payload: ModeUpdateRequest) -> dict:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported mode '{payload.mode}'. Supported modes: {sorted(SUPPORTED_MODES)}.",
+        )
+    if gateway_state.orchestrator_url:
+        raise HTTPException(
+            status_code=409,
+            detail="Gateway mode is managed by the orchestrator. Update the orchestrator mode instead.",
         )
     await gateway_state.set_mode(payload.mode)
     return {"status": "updated", "mode": gateway_state.mode}

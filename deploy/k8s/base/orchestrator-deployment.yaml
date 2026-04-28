@@ -1,31 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gateway
+  name: orchestrator
   labels:
-    app: gateway
+    app: orchestrator
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: gateway
+      app: orchestrator
   template:
     metadata:
       labels:
-        app: gateway
+        app: orchestrator
     spec:
       containers:
-        - name: gateway
-          image: ai-loadbalancer-gateway:dev
+        - name: orchestrator
+          image: ai-loadbalancer-orchestrator:dev
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8001
+            - containerPort: 8002
               name: http
           env:
             - name: WORKER_URLS
               value: http://worker-a:8000,http://worker-b:8000
-            - name: ORCHESTRATOR_URL
-              value: http://orchestrator:8002
+            - name: DEFAULT_MODE
+              value: round_robin
+            - name: METRICS_COLLECTOR_URL
+              value: http://metrics-collector:8004
           readinessProbe:
             httpGet:
               path: /health

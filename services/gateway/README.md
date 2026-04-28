@@ -23,6 +23,7 @@ Current implementation supports:
 - request forwarding to worker `/work`
 - Prometheus metrics for request volume and latency
 - gateway-side per-worker in-flight tracking
+- optional orchestrator policy polling via `ORCHESTRATOR_URL`
 
 ## Local Run
 
@@ -32,6 +33,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:WORKER_URLS="http://127.0.0.1:8000,http://127.0.0.1:8002"
+$env:ORCHESTRATOR_URL="http://127.0.0.1:8003"
 uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 

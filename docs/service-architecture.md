@@ -74,6 +74,31 @@ Stage 1 is split into a `data plane` and a `control plane`.
 4. `orchestrator` publishes a routing policy
 5. `gateway` refreshes and applies that policy locally
 
+## Orchestrator V1 Boundary
+
+The first orchestrator implementation will only own:
+- active routing mode
+- policy versioning
+- static policy publication
+
+It will not yet own:
+- predictive scoring
+- worker health scoring
+- Redis-backed state
+- scale decisions
+
+## Metrics Collector V1 Boundary
+
+The first metrics collector implementation will:
+- poll structured `/health` endpoints from workers and gateway
+- normalize that state into one snapshot
+- expose the snapshot to the orchestrator
+
+It will not yet:
+- parse Prometheus metrics directly
+- persist history
+- compute forecasts
+
 ## Stage 1 Decision
 
 The gateway will not call the orchestrator on every request.
@@ -84,4 +109,3 @@ Instead:
 - routing stays in the data plane
 
 This avoids turning the control plane into a per-request bottleneck.
-

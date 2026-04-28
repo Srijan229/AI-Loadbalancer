@@ -9,6 +9,9 @@ resources:
   - worker-a-service.yaml
   - worker-b-deployment.yaml
   - worker-b-service.yaml
+  - metrics-collector-deployment.yaml
+  - metrics-collector-service.yaml
+  - orchestrator-deployment.yaml
+  - orchestrator-service.yaml
   - gateway-deployment.yaml
   - gateway-service.yaml
-

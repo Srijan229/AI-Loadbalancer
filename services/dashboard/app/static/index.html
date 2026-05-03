@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Load Orchestrator Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="background-grid"></div>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Distributed Systems Demo Console</p>
+          <h1>AI-Driven Adaptive Load Orchestrator</h1>
+          <p class="hero-copy">
+            Live control view for routing mode, worker pressure, predictor output, and injected faults.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <div class="stat-card accent">
+            <span class="stat-label">Policy Mode</span>
+            <strong id="modeValue">-</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Policy Version</span>
+            <strong id="policyVersionValue">-</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Healthy Workers</span>
+            <strong id="healthyWorkersValue">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel control-panel">
+        <div class="panel-header">
+          <h2>Control Plane</h2>
+          <button id="refreshButton" class="ghost-button">Refresh</button>
+        </div>
+        <div class="time-grid">
+          <div class="time-status-card">
+            <span class="stat-label">Simulation Mode</span>
+            <strong id="timeModeValue">-</strong>
+          </div>
+          <div class="time-status-card accent">
+            <span class="stat-label">Effective Time</span>
+            <strong id="effectiveTimeValue">-</strong>
+          </div>
+          <div class="time-status-card">
+            <span class="stat-label">Simulated Time</span>
+            <strong id="simulatedTimeValue">-</strong>
+          </div>
+        </div>
+        <div class="time-actions">
+          <button id="freezeTimeButton" class="worker-action accent">Freeze Time</button>
+          <button id="resumeTimeButton" class="worker-action">Resume Realtime</button>
+          <button class="worker-action" data-advance-hours="1">+1 Hour</button>
+          <button class="worker-action" data-advance-hours="6">+6 Hours</button>
+          <button class="worker-action" data-advance-days="1">+1 Day</button>
+        </div>
+        <div class="time-actions">
+          <button class="worker-action accent" data-preset="sale_day_evening">Jump to Sale-Day Evening</button>
+          <button class="worker-action" data-preset="weekday_peak">Jump to Weekday Peak</button>
+          <button class="worker-action" data-preset="weekend_evening">Jump to Weekend Evening</button>
+          <button class="worker-action" data-preset="month_end_billing">Jump to Month-End Billing</button>
+        </div>
+        <div class="mode-grid">
+          <button class="mode-button" data-mode="round_robin">Round Robin</button>
+          <button class="mode-button" data-mode="least_connections">Least Connections</button>
+          <button class="mode-button" data-mode="predictive">Predictive</button>
+        </div>
+        <p id="modeStatus" class="status-text">Waiting for live data.</p>
+      </section>
+
+      <section class="grid two-up">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Service Status</h2>
+          </div>
+          <div id="servicesGrid" class="service-grid"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>System Summary</h2>
+          </div>
+          <dl id="summaryGrid" class="summary-grid"></dl>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Time Jump Timeline</h2>
+          <p class="panel-note">Recent simulation-time actions captured in the dashboard history.</p>
+        </div>
+        <div id="timeEventsList" class="time-events-list"></div>
+      </section>
+
+      <section class="grid two-up">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Strategic Forecast</h2>
+            <p class="panel-note">Long-horizon demand recommendation from historical patterns.</p>
+          </div>
+          <div id="strategicRecommendation" class="strategic-grid"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Future Window Preview</h2>
+            <p class="panel-note">Preview an arbitrary high-demand window before it happens.</p>
+          </div>
+          <div class="preview-actions">
+            <button id="previewSaleButton" class="worker-action accent">Preview Sale-Day Evening</button>
+            <button id="previewWeekdayButton" class="worker-action">Preview Weekday Peak</button>
+          </div>
+          <div id="previewRecommendation" class="strategic-grid strategic-preview"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Live Graphs</h2>
+          <p class="panel-note">Rolling telemetry history from the dashboard buffer.</p>
+        </div>
+        <div class="charts-grid">
+          <article class="chart-card">
+            <h3>Traffic Pressure</h3>
+            <p class="chart-copy">Total in-flight requests and queue pressure over time.</p>
+            <div id="trafficChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Prediction Signals</h3>
+            <p class="chart-copy">Maximum load score versus maximum predicted pressure.</p>
+            <div id="predictionChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Worker Load Scores</h3>
+            <p class="chart-copy">Per-worker load score trends from live telemetry.</p>
+            <div id="loadChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Policy Weights</h3>
+            <p class="chart-copy">How routing policy shifts traffic across workers.</p>
+            <div id="weightChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Fault Delay</h3>
+            <p class="chart-copy">Injected latency faults by worker over time.</p>
+            <div id="faultChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Queue Depth</h3>
+            <p class="chart-copy">Per-worker queue depth during burst handling.</p>
+            <div id="queueChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Strategic Forecast Band</h3>
+            <p class="chart-copy">Average vs peak expected demand from long-horizon forecast windows.</p>
+            <div id="strategicBandChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Recommended Capacity</h3>
+            <p class="chart-copy">Target worker count from the strategic recommendation over time.</p>
+            <div id="capacityChart" class="chart-surface"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Worker State</h2>
+        </div>
+        <div id="workersGrid" class="workers-grid"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

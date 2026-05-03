@@ -11,7 +11,15 @@ resources:
   - worker-b-service.yaml
   - metrics-collector-deployment.yaml
   - metrics-collector-service.yaml
+  - predictor-deployment.yaml
+  - predictor-service.yaml
+  - time-controller-deployment.yaml
+  - time-controller-service.yaml
+  - historical-forecaster-deployment.yaml
+  - historical-forecaster-service.yaml
   - orchestrator-deployment.yaml
   - orchestrator-service.yaml
   - gateway-deployment.yaml
   - gateway-service.yaml
+  - dashboard-deployment.yaml
+  - dashboard-service.yaml

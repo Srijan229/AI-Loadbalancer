@@ -30,6 +30,16 @@ Stage 1 is split into a `data plane` and a `control plane`.
 - forecasts short-horizon load trends
 - publishes predicted pressure scores
 
+#### `historical-forecaster`
+- reads synthetic multi-week workload history
+- models weekday/weekend/event-driven demand patterns
+- produces long-horizon demand forecasts for future windows
+
+#### `time-controller`
+- maintains simulation time for demos and forecasting
+- supports fast-forward and preset jumps to meaningful windows
+- gives strategic services a non-wall-clock time source
+
 #### `orchestrator`
 - computes routing weights for the gateway
 - supports three modes:
@@ -70,9 +80,11 @@ Stage 1 is split into a `data plane` and a `control plane`.
 ### Control path
 1. `metrics-collector` gathers metrics and stores snapshots
 2. `predictor` reads recent snapshots and computes forecasts
-3. `orchestrator` reads live state and predictions
-4. `orchestrator` publishes a routing policy
-5. `gateway` refreshes and applies that policy locally
+3. `time-controller` can override current simulation time
+4. `historical-forecaster` provides long-horizon baseline forecasts
+5. `orchestrator` reads live state and predictions
+6. `orchestrator` publishes a routing policy
+7. `gateway` refreshes and applies that policy locally
 
 ## Orchestrator V1 Boundary
 

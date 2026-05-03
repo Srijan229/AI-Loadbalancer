@@ -1,39 +1,31 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: orchestrator
+  name: predictor
   labels:
-    app: orchestrator
+    app: predictor
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: orchestrator
+      app: predictor
   template:
     metadata:
       labels:
-        app: orchestrator
+        app: predictor
     spec:
       containers:
-        - name: orchestrator
-          image: ai-loadbalancer-orchestrator:strategic-v3
+        - name: predictor
+          image: ai-loadbalancer-predictor:dev
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8002
+            - containerPort: 8003
               name: http
           env:
-            - name: WORKER_URLS
-              value: http://worker-a:8000,http://worker-b:8000
-            - name: DEFAULT_MODE
-              value: round_robin
             - name: METRICS_COLLECTOR_URL
               value: http://metrics-collector:8004
-            - name: PREDICTOR_URL
-              value: http://predictor:8003
-            - name: HISTORICAL_FORECASTER_URL
-              value: http://historical-forecaster:8005
-            - name: TIME_CONTROLLER_URL
-              value: http://time-controller:8006
+            - name: PREDICTOR_POLL_SECONDS
+              value: "2"
           readinessProbe:
             httpGet:
               path: /health

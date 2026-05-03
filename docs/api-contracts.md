@@ -165,6 +165,17 @@ Response:
   "mode": "predictive",
   "version": 3,
   "generated_at": "2026-04-26T15:00:00Z",
+  "strategic_forecast": {
+    "avg_expected_rps": 61.2,
+    "peak_expected_rps": 88.5,
+    "peak_recommended_workers": 3,
+    "demand_level": "surge"
+  },
+  "scale_recommendation": {
+    "action": "pre_scale_up",
+    "current_workers": 2,
+    "target_workers": 3
+  },
   "workers": [
     {
       "worker_id": "worker-1",
@@ -185,6 +196,30 @@ Response:
       "reason": "high_latency_fault_penalty"
     }
   ]
+}
+```
+
+### `GET /recommendations`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-05-03T21:00:00Z",
+  "effective_time_utc": "2026-05-09T20:00:00Z",
+  "strategic_forecast": {
+    "avg_expected_rps": 61.2,
+    "peak_expected_rps": 88.5,
+    "peak_recommended_workers": 3,
+    "demand_level": "surge",
+    "matched_strategies": ["exact_day_hour_minute_sale_event"]
+  },
+  "scale_recommendation": {
+    "action": "pre_scale_up",
+    "current_workers": 2,
+    "target_workers": 3,
+    "demand_level": "surge"
+  }
 }
 ```
 

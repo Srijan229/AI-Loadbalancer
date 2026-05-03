@@ -1,55 +1,52 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: orchestrator
-  labels:
-    app: orchestrator
+  name: dashboard
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: orchestrator
+      app: dashboard
   template:
     metadata:
       labels:
-        app: orchestrator
+        app: dashboard
     spec:
       containers:
-        - name: orchestrator
-          image: ai-loadbalancer-orchestrator:strategic-v3
+        - name: dashboard
+          image: ai-loadbalancer-dashboard:time-v2
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8002
-              name: http
+            - containerPort: 8010
           env:
-            - name: WORKER_URLS
-              value: http://worker-a:8000,http://worker-b:8000
-            - name: DEFAULT_MODE
-              value: round_robin
+            - name: GATEWAY_URL
+              value: http://gateway:8001
+            - name: ORCHESTRATOR_URL
+              value: http://orchestrator:8002
             - name: METRICS_COLLECTOR_URL
               value: http://metrics-collector:8004
             - name: PREDICTOR_URL
               value: http://predictor:8003
-            - name: HISTORICAL_FORECASTER_URL
-              value: http://historical-forecaster:8005
             - name: TIME_CONTROLLER_URL
               value: http://time-controller:8006
+            - name: WORKER_URLS
+              value: http://worker-a:8000,http://worker-b:8000
           readinessProbe:
             httpGet:
               path: /health
-              port: http
+              port: 8010
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
-              port: http
-            initialDelaySeconds: 10
+              port: 8010
+            initialDelaySeconds: 5
             periodSeconds: 10
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 50m
+              memory: 64Mi
             limits:
-              cpu: 500m
+              cpu: 250m
               memory: 256Mi

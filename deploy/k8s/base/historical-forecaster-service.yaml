@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: historical-forecaster
+spec:
+  selector:
+    app: historical-forecaster
+  ports:
+    - name: http
+      port: 8005
+      targetPort: 8005

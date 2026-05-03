@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: time-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: time-controller
+  template:
+    metadata:
+      labels:
+        app: time-controller
+    spec:
+      containers:
+        - name: time-controller
+          image: ai-loadbalancer-time-controller:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8006
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8006
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8006
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

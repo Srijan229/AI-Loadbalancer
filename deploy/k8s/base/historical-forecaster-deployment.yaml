@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: historical-forecaster
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: historical-forecaster
+  template:
+    metadata:
+      labels:
+        app: historical-forecaster
+    spec:
+      containers:
+        - name: historical-forecaster
+          image: ai-loadbalancer-historical-forecaster:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

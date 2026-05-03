@@ -6,6 +6,7 @@ __pycache__/
 .Python
 .venv/
 venv/
+scripts/load/.venv/
 
 # Build and packaging
 build/
@@ -34,4 +35,3 @@ htmlcov/
 
 # Minikube / local tooling artifacts
 .minikube/
-

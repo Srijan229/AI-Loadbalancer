@@ -25,9 +25,10 @@ class ModeUpdateRequest(BaseModel):
 class OrchestratorPolicy(BaseModel):
     mode: str
     version: int
+    workers: list[dict] = Field(default_factory=list)
 
 
-SUPPORTED_MODES = {"round_robin", "least_connections"}
+SUPPORTED_MODES = {"round_robin", "least_connections", "predictive"}
 
 
 class WorkerWorkResponse(BaseModel):
@@ -88,6 +89,7 @@ class GatewayState:
         self.lock = asyncio.Lock()
         self.client: Optional[httpx.AsyncClient] = None
         self.worker_inflight = {worker_url: 0 for worker_url in self.worker_urls}
+        self.worker_weights = {worker_url: 1.0 for worker_url in self.worker_urls}
         self.policy_version = 0
         self.policy_source = "local"
         self.policy_task: Optional[asyncio.Task] = None
@@ -124,6 +126,8 @@ class GatewayState:
                 worker_url = self._choose_round_robin_locked()
             elif self.mode == "least_connections":
                 worker_url = self._choose_least_connections_locked()
+            elif self.mode == "predictive":
+                worker_url = self._choose_predictive_locked()
             else:
                 raise ValueError(f"Unsupported gateway mode: {self.mode}")
             self.worker_inflight[worker_url] += 1
@@ -138,6 +142,8 @@ class GatewayState:
             self.mode = mode
             self.policy_source = "local"
             self.policy_version += 1
+            if mode != "predictive":
+                self.worker_weights = {worker_url: 1.0 for worker_url in self.worker_urls}
 
     async def apply_orchestrator_policy(self, policy: OrchestratorPolicy) -> None:
         if policy.mode not in SUPPORTED_MODES:
@@ -146,6 +152,7 @@ class GatewayState:
             self.mode = policy.mode
             self.policy_version = policy.version
             self.policy_source = "orchestrator"
+            self.worker_weights = self._normalize_policy_workers(policy.workers)
 
     async def health_snapshot(self) -> dict:
         async with self.lock:
@@ -155,11 +162,58 @@ class GatewayState:
                 "policy_version": self.policy_version,
                 "orchestrator_url": self.orchestrator_url or None,
                 "configured_workers": self.worker_urls,
+                "worker_weights": {
+                    _worker_label_from_url(worker_url): round(weight, 4)
+                    for worker_url, weight in self.worker_weights.items()
+                },
                 "worker_inflight": {
                     _worker_label_from_url(worker_url): inflight
                     for worker_url, inflight in self.worker_inflight.items()
                 },
             }
+
+    def _choose_predictive_locked(self) -> str:
+        candidates: list[tuple[str, float]] = []
+        for worker_url in self.worker_urls:
+            weight = self.worker_weights.get(worker_url, 0.0)
+            if weight <= 0:
+                continue
+            effective_score = weight / (1 + self.worker_inflight[worker_url])
+            candidates.append((worker_url, effective_score))
+        if not candidates:
+            return self._choose_round_robin_locked()
+
+        start_index = self.next_index
+        best_worker = candidates[0][0]
+        best_score = -1.0
+        for offset in range(len(self.worker_urls)):
+            worker_url = self.worker_urls[(start_index + offset) % len(self.worker_urls)]
+            for candidate_url, candidate_score in candidates:
+                if candidate_url != worker_url:
+                    continue
+                if candidate_score > best_score:
+                    best_worker = candidate_url
+                    best_score = candidate_score
+                break
+        self.next_index = (self.worker_urls.index(best_worker) + 1) % len(self.worker_urls)
+        return best_worker
+
+    def _normalize_policy_workers(self, policy_workers: list[dict]) -> dict[str, float]:
+        normalized: dict[str, float] = {}
+        for worker_url in self.worker_urls:
+            matching_policy = next(
+                (
+                    worker
+                    for worker in policy_workers
+                    if worker.get("worker_url") == worker_url
+                    or worker.get("worker_id") == _worker_label_from_url(worker_url)
+                ),
+                None,
+            )
+            normalized[worker_url] = float(matching_policy.get("weight", 0.0)) if matching_policy else 0.0
+        if any(weight > 0 for weight in normalized.values()):
+            return normalized
+        return {worker_url: 1.0 for worker_url in self.worker_urls}
 
 
 gateway_state = GatewayState()

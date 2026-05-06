@@ -57,6 +57,17 @@ class TimePresetRequest(BaseModel):
     preset: str
 
 
+class ExperimentRunRequest(BaseModel):
+    scenario_id: str
+    mode: str
+
+
+class ExperimentBatchRequest(BaseModel):
+    scenario_id: str
+    modes: list[str]
+    repeat_count: int = Field(default=2, ge=1, le=10)
+
+
 class DashboardState:
     def __init__(self) -> None:
         self.gateway_url = _strip_url(os.getenv("GATEWAY_URL", "http://gateway:8001"))
@@ -66,6 +77,9 @@ class DashboardState:
         )
         self.predictor_url = _strip_url(os.getenv("PREDICTOR_URL", "http://predictor:8003"))
         self.time_controller_url = _strip_url(os.getenv("TIME_CONTROLLER_URL", "http://time-controller:8006"))
+        self.experiment_runner_url = _strip_url(
+            os.getenv("EXPERIMENT_RUNNER_URL", "http://experiment-runner:8007")
+        )
         self.worker_urls = _load_urls("WORKER_URLS", "http://worker-a:8000,http://worker-b:8000")
         self.worker_urls_by_id = {_worker_id_from_url(worker_url): worker_url for worker_url in self.worker_urls}
         self.client: httpx.AsyncClient | None = None
@@ -341,6 +355,110 @@ class DashboardState:
             raise HTTPException(status_code=response.status_code, detail=response.text)
         return response.json()
 
+    async def fetch_experiment_scenarios(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.experiment_runner_url}/scenarios")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def run_experiment(self, payload: ExperimentRunRequest) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        create_response = await self.client.post(
+            f"{self.experiment_runner_url}/runs",
+            json=payload.model_dump(),
+            timeout=30.0,
+        )
+        if create_response.status_code >= 400:
+            raise HTTPException(status_code=create_response.status_code, detail=create_response.text)
+        created_run = create_response.json()
+        run_id = created_run["run_id"]
+
+        prepare_response = await self.client.post(
+            f"{self.experiment_runner_url}/runs/{run_id}/prepare",
+            timeout=30.0,
+        )
+        if prepare_response.status_code >= 400:
+            raise HTTPException(status_code=prepare_response.status_code, detail=prepare_response.text)
+
+        execute_response = await self.client.post(
+            f"{self.experiment_runner_url}/runs/{run_id}/execute",
+            timeout=300.0,
+        )
+        if execute_response.status_code >= 400:
+            raise HTTPException(status_code=execute_response.status_code, detail=execute_response.text)
+
+        run_response = await self.client.get(f"{self.experiment_runner_url}/runs/{run_id}", timeout=30.0)
+        if run_response.status_code >= 400:
+            raise HTTPException(status_code=run_response.status_code, detail=run_response.text)
+
+        events_response = await self.client.get(
+            f"{self.experiment_runner_url}/runs/{run_id}/events",
+            timeout=30.0,
+        )
+        if events_response.status_code >= 400:
+            raise HTTPException(status_code=events_response.status_code, detail=events_response.text)
+
+        artifacts_response = await self.client.get(
+            f"{self.experiment_runner_url}/runs/{run_id}/artifacts",
+            timeout=30.0,
+        )
+        if artifacts_response.status_code >= 400:
+            raise HTTPException(status_code=artifacts_response.status_code, detail=artifacts_response.text)
+
+        comparison_response = await self.client.get(
+            f"{self.experiment_runner_url}/comparisons/{payload.scenario_id}",
+            timeout=30.0,
+        )
+        if comparison_response.status_code >= 400:
+            raise HTTPException(status_code=comparison_response.status_code, detail=comparison_response.text)
+
+        return {
+            "run": run_response.json(),
+            "events": events_response.json(),
+            "artifacts": artifacts_response.json(),
+            "comparison": comparison_response.json(),
+            "execution": execute_response.json(),
+        }
+
+    async def fetch_experiment_comparison(self, scenario_id: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.experiment_runner_url}/comparisons/{scenario_id}", timeout=30.0)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def fetch_experiment_run_artifacts(self, run_id: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.experiment_runner_url}/runs/{run_id}/artifacts", timeout=30.0)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def run_experiment_batch(self, payload: ExperimentBatchRequest) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.post(
+            f"{self.experiment_runner_url}/batches",
+            json=payload.model_dump(),
+            timeout=1800.0,
+        )
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def fetch_experiment_batch(self, batch_id: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.experiment_runner_url}/batches/{batch_id}", timeout=30.0)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
 
 state = DashboardState()
 STATIC_DIR = Path(__file__).parent / "static"
@@ -391,6 +509,7 @@ async def health() -> dict[str, Any]:
         "metrics_collector_url": state.metrics_collector_url,
         "predictor_url": state.predictor_url,
         "time_controller_url": state.time_controller_url,
+        "experiment_runner_url": state.experiment_runner_url,
         "worker_ids": sorted(state.worker_urls_by_id),
     }
 
@@ -468,3 +587,33 @@ async def inject_latency(worker_id: str, payload: LatencyFaultRequest) -> dict[s
 @app.post("/api/workers/{worker_id}/faults/clear")
 async def clear_faults(worker_id: str) -> dict[str, Any]:
     return await state.clear_worker_faults(worker_id)
+
+
+@app.get("/api/experiments/scenarios")
+async def get_experiment_scenarios() -> dict[str, Any]:
+    return await state.fetch_experiment_scenarios()
+
+
+@app.post("/api/experiments/runs")
+async def run_experiment(payload: ExperimentRunRequest) -> dict[str, Any]:
+    return await state.run_experiment(payload)
+
+
+@app.get("/api/experiments/comparisons/{scenario_id}")
+async def get_experiment_comparison(scenario_id: str) -> dict[str, Any]:
+    return await state.fetch_experiment_comparison(scenario_id)
+
+
+@app.get("/api/experiments/runs/{run_id}/artifacts")
+async def get_experiment_run_artifacts(run_id: str) -> dict[str, Any]:
+    return await state.fetch_experiment_run_artifacts(run_id)
+
+
+@app.post("/api/experiments/batches")
+async def run_experiment_batch(payload: ExperimentBatchRequest) -> dict[str, Any]:
+    return await state.run_experiment_batch(payload)
+
+
+@app.get("/api/experiments/batches/{batch_id}")
+async def get_experiment_batch(batch_id: str) -> dict[str, Any]:
+    return await state.fetch_experiment_batch(batch_id)

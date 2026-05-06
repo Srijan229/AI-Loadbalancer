@@ -1,54 +1,55 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dashboard
+  name: experiment-runner
+  labels:
+    app: experiment-runner
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: dashboard
+      app: experiment-runner
   template:
     metadata:
       labels:
-        app: dashboard
+        app: experiment-runner
     spec:
       containers:
-        - name: dashboard
-          image: ai-loadbalancer-dashboard:lab-v1
+        - name: experiment-runner
+          image: ai-loadbalancer-experiment-runner:lab-v1
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8010
+            - containerPort: 8007
+              name: http
           env:
+            - name: PROJECT_ROOT
+              value: /app
+            - name: DASHBOARD_URL
+              value: http://dashboard:8010
             - name: GATEWAY_URL
               value: http://gateway:8001
             - name: ORCHESTRATOR_URL
               value: http://orchestrator:8002
-            - name: METRICS_COLLECTOR_URL
-              value: http://metrics-collector:8004
-            - name: PREDICTOR_URL
-              value: http://predictor:8003
             - name: TIME_CONTROLLER_URL
               value: http://time-controller:8006
-            - name: EXPERIMENT_RUNNER_URL
-              value: http://experiment-runner:8007
-            - name: WORKER_URLS
-              value: http://worker-a:8000,http://worker-b:8000
+            - name: WORKER_ENDPOINTS
+              value: worker-a=http://worker-a:8000,worker-b=http://worker-b:8000
           readinessProbe:
             httpGet:
               path: /health
-              port: 8010
+              port: http
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
-              port: 8010
-            initialDelaySeconds: 5
+              port: http
+            initialDelaySeconds: 6
             periodSeconds: 10
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: 250m
-              memory: 256Mi
+              cpu: 500m
+              memory: 512Mi

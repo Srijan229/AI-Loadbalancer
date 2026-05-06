@@ -360,16 +360,32 @@ Request:
 
 ## Experiment Runner
 
-### `POST /scenarios/run`
+### `GET /scenarios`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-05-03T22:00:00Z",
+  "count": 5,
+  "scenarios": [
+    {
+      "scenario_id": "sale_day_surge_with_fault",
+      "description": "Sale-day surge with worker-a slowdown to compare resilience across modes.",
+      "time_preset": "sale_day_evening"
+    }
+  ]
+}
+```
+
+### `POST /runs`
 
 Request:
 
 ```json
 {
-  "mode": "predictive",
-  "traffic_pattern": "bursty",
-  "duration_seconds": 120,
-  "inject_failure": true
+  "scenario_id": "sale_day_surge_with_fault",
+  "mode": "predictive_rules"
 }
 ```
 
@@ -377,7 +393,196 @@ Response:
 
 ```json
 {
-  "run_id": "exp-001",
-  "status": "started"
+  "run_id": "run_2026_05_03_001",
+  "status": "created"
+}
+```
+
+### `GET /runs/{run_id}`
+
+Response:
+
+```json
+{
+  "run_id": "run_2026_05_03_001",
+  "mode": "predictive_rules",
+  "scenario_id": "sale_day_surge_with_fault",
+  "status": "created",
+  "load_profile": {
+    "type": "burst",
+    "users": 80,
+    "duration_seconds": 180
+  }
+}
+```
+
+### `POST /runs/{run_id}/prepare`
+
+Response:
+
+```json
+{
+  "run_id": "run_2026_05_03_001",
+  "status": "prepared",
+  "execution": {
+    "orchestrator_mode": "predictive"
+  }
+}
+```
+
+### `POST /runs/{run_id}/execute`
+
+Response:
+
+```json
+{
+  "run_id": "run_2026_05_03_001",
+  "status": "completed",
+  "summary": {
+    "scenario_id": "smoke_fault",
+    "locust_return_code": 0
+  }
+}
+```
+
+### `GET /comparisons/{scenario_id}`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-05-04T01:00:00Z",
+  "scenario_id": "smoke_fault",
+  "mode_count": 1,
+  "runs": [
+    {
+      "run_id": "run_2026_05_04_000001",
+      "mode": "predictive_rules",
+      "latency_p95_ms": 470.0
+    }
+  ]
+}
+```
+
+### `GET /runs/{run_id}/events`
+
+Response:
+
+```json
+{
+  "run_id": "run_2026_05_03_001",
+  "count": 4,
+  "events": [
+    {
+      "event_type": "run_created"
+    },
+    {
+      "event_type": "time_preset_applied"
+    },
+    {
+      "event_type": "orchestrator_mode_applied"
+    },
+    {
+      "event_type": "run_prepared"
+    }
+  ]
+}
+```
+
+### `GET /runs/{run_id}/artifacts`
+
+Response:
+
+```json
+{
+  "run_id": "run_2026_05_03_001",
+  "metadata": {
+    "scenario_id": "smoke_fault",
+    "mode": "predictive_rules",
+    "status": "completed"
+  },
+  "summary": {
+    "latency_p95_ms": 470.0,
+    "throughput_avg_rps": 33.63,
+    "policy_shift_count": 3,
+    "target_worker_shift_count": 1,
+    "scale_action_shift_count": 1
+  },
+  "events": [
+    {
+      "event_type": "policy_weight_shift",
+      "payload": {
+        "worker_id": "worker-a",
+        "previous": 0.5,
+        "current": 0.32
+      }
+    }
+  ],
+  "timeseries": [
+    {
+      "timestamp": "2026-05-04T01:30:40Z",
+      "max_queue_depth": 2,
+      "max_predicted_pressure": 19.5,
+      "target_workers": 3,
+      "scale_action": "pre_scale_up"
+    }
+  ],
+  "worker_timeseries": [
+    {
+      "timestamp": "2026-05-04T01:30:40Z",
+      "worker_id": "worker-a",
+      "load_score": 9.5,
+      "policy_weight": 0.31,
+      "policy_reason": "Predicted pressure rising on worker-a"
+    }
+  ]
+}
+```
+
+### `POST /batches`
+
+Request:
+
+```json
+{
+  "scenario_id": "smoke_fault",
+  "modes": ["round_robin", "least_connections", "predictive_rules"],
+  "repeat_count": 2
+}
+```
+
+Response:
+
+```json
+{
+  "batch_id": "batch_2026_05_05_001",
+  "scenario_id": "smoke_fault",
+  "repeat_count": 2,
+  "aggregates": [
+    {
+      "mode": "predictive_rules",
+      "run_count": 2,
+      "avg_latency_p95_ms": 470.0,
+      "avg_throughput_avg_rps": 33.6
+    }
+  ]
+}
+```
+
+### `GET /batches/{batch_id}`
+
+Response:
+
+```json
+{
+  "batch_id": "batch_2026_05_05_001",
+  "scenario_id": "smoke_fault",
+  "repeat_count": 2,
+  "aggregates": [
+    {
+      "mode": "round_robin",
+      "run_count": 2
+    }
+  ]
 }
 ```

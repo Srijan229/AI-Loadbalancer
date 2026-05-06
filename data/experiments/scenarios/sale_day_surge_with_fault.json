@@ -1,0 +1,21 @@
+{
+  "scenario_id": "sale_day_surge_with_fault",
+  "description": "Sale-day surge with worker-a slowdown to compare resilience across modes.",
+  "time_preset": "sale_day_evening",
+  "load_profile": {
+    "type": "burst",
+    "users": 80,
+    "spawn_rate": 20,
+    "duration_seconds": 180,
+    "target_rps": 120
+  },
+  "failure_plan": [
+    {
+      "type": "latency_injection",
+      "target": "worker-a",
+      "delay_ms": 800,
+      "at_second": 50,
+      "duration_seconds": 60
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "scenario_id": "sale_day_surge",
+  "description": "High-demand sale-day traffic window without explicit faults.",
+  "time_preset": "sale_day_evening",
+  "load_profile": {
+    "type": "burst",
+    "users": 70,
+    "spawn_rate": 18,
+    "duration_seconds": 180,
+    "target_rps": 120
+  },
+  "failure_plan": []
+}

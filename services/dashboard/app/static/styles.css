@@ -184,6 +184,78 @@ h1 {
   gap: 12px;
 }
 
+.time-events-list.compact {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.experiment-controls {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 1fr;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.control-field {
+  display: grid;
+  gap: 8px;
+  color: rgba(23, 23, 23, 0.72);
+  font-size: 0.9rem;
+}
+
+.control-field span {
+  font-weight: 700;
+}
+
+.control-field select {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.experiment-actions {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.experiment-subpanel {
+  margin-bottom: 0;
+}
+
+.comparison-table-wrap {
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.comparison-table th,
+.comparison-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+}
+
+.comparison-table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(23, 23, 23, 0.6);
+}
+
+.comparison-bar {
+  opacity: 0.9;
+}
+
 .time-event-card {
   display: flex;
   align-items: center;
@@ -524,6 +596,7 @@ h1 {
   .workers-grid,
   .strategic-grid,
   .time-grid,
+  .experiment-controls,
   .mode-grid,
   .service-grid {
     grid-template-columns: 1fr;

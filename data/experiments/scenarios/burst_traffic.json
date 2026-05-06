@@ -1,0 +1,13 @@
+{
+  "scenario_id": "burst_traffic",
+  "description": "Short burst traffic pattern without explicit worker faults.",
+  "time_preset": null,
+  "load_profile": {
+    "type": "burst",
+    "users": 40,
+    "spawn_rate": 12,
+    "duration_seconds": 120,
+    "target_rps": 90
+  },
+  "failure_plan": []
+}

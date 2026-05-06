@@ -1,0 +1,13 @@
+{
+  "scenario_id": "steady_low",
+  "description": "Low steady traffic with no injected failures.",
+  "time_preset": null,
+  "load_profile": {
+    "type": "constant",
+    "users": 12,
+    "spawn_rate": 4,
+    "duration_seconds": 60,
+    "target_rps": 20
+  },
+  "failure_plan": []
+}

@@ -23,3 +23,5 @@ resources:
   - gateway-service.yaml
   - dashboard-deployment.yaml
   - dashboard-service.yaml
+  - experiment-runner-deployment.yaml
+  - experiment-runner-service.yaml

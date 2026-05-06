@@ -16,6 +16,17 @@ const strategicRecommendation = document.getElementById("strategicRecommendation
 const previewRecommendation = document.getElementById("previewRecommendation");
 const previewSaleButton = document.getElementById("previewSaleButton");
 const previewWeekdayButton = document.getElementById("previewWeekdayButton");
+const scenarioSelect = document.getElementById("scenarioSelect");
+const experimentModeSelect = document.getElementById("experimentModeSelect");
+const experimentRepeatCountSelect = document.getElementById("experimentRepeatCountSelect");
+const runExperimentButton = document.getElementById("runExperimentButton");
+const runBatchExperimentButton = document.getElementById("runBatchExperimentButton");
+const refreshComparisonButton = document.getElementById("refreshComparisonButton");
+const experimentStatus = document.getElementById("experimentStatus");
+const latestRunSummary = document.getElementById("latestRunSummary");
+const comparisonTableWrap = document.getElementById("comparisonTableWrap");
+const experimentEventsList = document.getElementById("experimentEventsList");
+const batchAggregateSummary = document.getElementById("batchAggregateSummary");
 
 const chartTargets = {
   trafficChart: document.getElementById("trafficChart"),
@@ -26,6 +37,11 @@ const chartTargets = {
   queueChart: document.getElementById("queueChart"),
   strategicBandChart: document.getElementById("strategicBandChart"),
   capacityChart: document.getElementById("capacityChart"),
+  comparisonLatencyChart: document.getElementById("comparisonLatencyChart"),
+  comparisonThroughputChart: document.getElementById("comparisonThroughputChart"),
+  experimentPressureChart: document.getElementById("experimentPressureChart"),
+  experimentWorkerLoadChart: document.getElementById("experimentWorkerLoadChart"),
+  experimentPolicyWeightChart: document.getElementById("experimentPolicyWeightChart"),
 };
 
 const palette = [
@@ -36,6 +52,11 @@ const palette = [
   "#93348f",
   "#127f96",
 ];
+
+let experimentScenarios = [];
+let latestExperimentArtifacts = null;
+let latestExperimentEvents = null;
+let latestExperimentBatch = null;
 
 function statusPill(status) {
   const normalized = status === "ok" ? "good" : status === "degraded" ? "warn" : "bad";
@@ -118,6 +139,338 @@ function renderRecommendationCard(target, title, payload) {
       <p><strong>Event Types</strong>: ${(strategic.event_types || []).join(", ") || "-"}</p>
     </article>
   `;
+}
+
+function renderLatestRunSummary(runPayload, executionPayload, artifactsPayload = null) {
+  if (!runPayload || !executionPayload) {
+    latestRunSummary.innerHTML = '<div class="chart-empty">No experiment run executed yet.</div>';
+    return;
+  }
+  const summary = artifactsPayload?.summary || executionPayload.summary || {};
+  latestRunSummary.innerHTML = `
+    <article class="strategic-card">
+      <h3>${runPayload.scenario_id}</h3>
+      <p><strong>Run Id</strong>: ${runPayload.run_id}</p>
+      <p><strong>Mode</strong>: ${runPayload.mode}</p>
+      <p><strong>Status</strong>: ${runPayload.status}</p>
+      <p><strong>P95 Latency</strong>: ${formatNumber(summary.latency_p95_ms)} ms</p>
+      <p><strong>Throughput</strong>: ${formatNumber(summary.throughput_avg_rps)} rps</p>
+      <p><strong>Failures</strong>: ${formatNumber(summary.requests_failed)}</p>
+      <p><strong>Policy Shifts</strong>: ${formatNumber(summary.policy_shift_count)}</p>
+      <p><strong>Target Worker Shifts</strong>: ${formatNumber(summary.target_worker_shift_count)}</p>
+      <p><strong>Scale Action Shifts</strong>: ${formatNumber(summary.scale_action_shift_count)}</p>
+    </article>
+  `;
+}
+
+function renderComparisonTable(comparisonPayload) {
+  const runs = comparisonPayload?.runs || [];
+  if (!runs.length) {
+    comparisonTableWrap.innerHTML = '<div class="chart-empty">No comparison runs for this scenario yet.</div>';
+    return;
+  }
+  comparisonTableWrap.innerHTML = `
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Mode</th>
+          <th>P50</th>
+          <th>P95</th>
+          <th>P99</th>
+          <th>RPS</th>
+          <th>Error</th>
+          <th>Queue</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${runs
+          .map(
+            (run) => `
+              <tr>
+                <td>${run.mode}</td>
+                <td>${formatNumber(run.latency_p50_ms)}</td>
+                <td>${formatNumber(run.latency_p95_ms)}</td>
+                <td>${formatNumber(run.latency_p99_ms)}</td>
+                <td>${formatNumber(run.throughput_avg_rps)}</td>
+                <td>${formatNumber(run.error_rate)}</td>
+                <td>${formatNumber(run.max_queue_depth)}</td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderBatchAggregateSummary(batchPayload) {
+  const aggregates = batchPayload?.aggregates || [];
+  if (!aggregates.length) {
+    batchAggregateSummary.innerHTML = '<div class="chart-empty">No repeated batch executed yet.</div>';
+    return;
+  }
+
+  batchAggregateSummary.innerHTML = aggregates
+    .map(
+      (aggregate) => `
+        <article class="strategic-card">
+          <h3>${aggregate.mode}</h3>
+          <p><strong>Run Count</strong>: ${formatNumber(aggregate.run_count)}</p>
+          <p><strong>Avg P95</strong>: ${formatNumber(aggregate.avg_latency_p95_ms)} ms</p>
+          <p><strong>Best P95</strong>: ${formatNumber(aggregate.best_latency_p95_ms)} ms</p>
+          <p><strong>Worst P95</strong>: ${formatNumber(aggregate.worst_latency_p95_ms)} ms</p>
+          <p><strong>Avg Throughput</strong>: ${formatNumber(aggregate.avg_throughput_avg_rps)} rps</p>
+          <p><strong>Avg Queue</strong>: ${formatNumber(aggregate.avg_max_queue_depth)}</p>
+          <p><strong>Avg Policy Shifts</strong>: ${formatNumber(aggregate.avg_policy_shift_count)}</p>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderExperimentEventTimeline(eventsPayload) {
+  const events = eventsPayload?.events || [];
+  if (!events.length) {
+    experimentEventsList.innerHTML = '<div class="chart-empty">No run events recorded yet.</div>';
+    return;
+  }
+
+  const styleMap = {
+    policy_weight_shift: "warn",
+    target_workers_shift: "good",
+    scale_action_shift: "good",
+    fault_injected: "bad",
+  };
+
+  experimentEventsList.innerHTML = events
+    .map((event) => {
+      const label = event.event_type.replaceAll("_", " ");
+      const style = styleMap[event.event_type] || "good";
+      const payload = event.payload || {};
+      let detail = "";
+      if (event.event_type === "policy_weight_shift") {
+        detail = `${payload.worker_id}: ${formatNumber(payload.previous)} -> ${formatNumber(payload.current)}`;
+      } else if (event.event_type === "target_workers_shift" || event.event_type === "scale_action_shift") {
+        detail = `${formatNumber(payload.previous)} -> ${formatNumber(payload.current)}`;
+      }
+      return `
+        <article class="time-event-card">
+          <div>
+            <strong>${label}</strong>
+            <p>${formatTimestamp(event.timestamp)}</p>
+            ${detail ? `<p>${detail}</p>` : ""}
+          </div>
+          <div class="time-event-meta">
+            <span class="pill ${style}">${event.event_type}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function buildComparisonSeries(runs, selector, colorOffset = 0) {
+  return runs.map((run, index) => ({
+    label: run.mode,
+    color: palette[(index + colorOffset) % palette.length],
+    values: [selector(run)],
+  }));
+}
+
+function renderComparisonBarChart(target, chartTitle, runs, selector, colorOffset = 0) {
+  if (!runs.length) {
+    renderEmptyChart(target);
+    return;
+  }
+
+  const width = 560;
+  const height = 220;
+  const leftPad = 44;
+  const topPad = 16;
+  const bottomPad = 42;
+  const chartWidth = width - leftPad - 10;
+  const chartHeight = height - topPad - bottomPad;
+  const maxValue = Math.max(...runs.map((run) => selector(run) || 0), 1);
+  const barWidth = Math.max(36, chartWidth / Math.max(runs.length * 1.8, 2));
+  const gap = chartWidth / Math.max(runs.length, 1);
+
+  const gridLines = [];
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const ratio = tick / 4;
+    const y = topPad + (chartHeight * ratio);
+    const value = (maxValue * (1 - ratio)).toFixed(maxValue < 10 ? 2 : 1);
+    gridLines.push(`<line class="chart-grid-line" x1="${leftPad}" y1="${y}" x2="${width - 10}" y2="${y}" />`);
+    gridLines.push(`<text class="chart-label" x="0" y="${y + 4}">${value}</text>`);
+  }
+
+  const bars = runs
+    .map((run, index) => {
+      const value = selector(run) || 0;
+      const x = leftPad + (gap * index) + ((gap - barWidth) / 2);
+      const barHeight = (value / maxValue) * chartHeight;
+      const y = topPad + chartHeight - barHeight;
+      const color = palette[(index + colorOffset) % palette.length];
+      return `
+        <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="10" fill="${color}" class="comparison-bar" />
+        <text class="chart-value-label" x="${x + (barWidth / 2) - 12}" y="${Math.max(y - 6, topPad + 10)}">${formatNumber(value)}</text>
+        <text class="chart-label" x="${x - 8}" y="${height - 12}">${run.mode}</text>
+      `;
+    })
+    .join("");
+
+  target.innerHTML = `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${chartTitle}">
+      ${gridLines.join("")}
+      <line class="chart-axis-line" x1="${leftPad}" y1="${height - bottomPad}" x2="${width - 10}" y2="${height - bottomPad}" />
+      ${bars}
+    </svg>
+  `;
+}
+
+function renderExperimentCharts(comparisonPayload) {
+  const runs = comparisonPayload?.runs || [];
+  if (!runs.length) {
+    renderEmptyChart(chartTargets.comparisonLatencyChart);
+    renderEmptyChart(chartTargets.comparisonThroughputChart);
+    return;
+  }
+  renderComparisonBarChart(
+    chartTargets.comparisonLatencyChart,
+    "Latency Comparison",
+    runs,
+    (run) => run.latency_p95_ms ?? 0
+  );
+  renderComparisonBarChart(
+    chartTargets.comparisonThroughputChart,
+    "Throughput Comparison",
+    runs,
+    (run) => run.throughput_avg_rps ?? 0,
+    2
+  );
+}
+
+function selectLatestRunFromComparison(comparisonPayload) {
+  const runs = comparisonPayload?.runs || [];
+  if (!runs.length) {
+    return null;
+  }
+  return [...runs].sort((left, right) => `${right.run_id}`.localeCompare(`${left.run_id}`))[0];
+}
+
+function renderExperimentRunCharts(artifactsPayload, eventsPayload) {
+  const systemPoints = artifactsPayload?.timeseries || [];
+  const workerPoints = artifactsPayload?.worker_timeseries || [];
+  const labels = systemPoints.map((point) => formatTimeLabel(point.timestamp));
+  const events = eventsPayload?.events || [];
+  const markerTimestamps = new Set(
+    events
+      .filter((event) =>
+        [
+          "time_preset_applied",
+          "orchestrator_mode_applied",
+          "fault_injected",
+          "load_generator_completed",
+          "policy_weight_shift",
+          "target_workers_shift",
+          "scale_action_shift",
+        ].includes(event.event_type)
+      )
+      .map((event) => event.timestamp)
+  );
+  const markers = systemPoints
+    .map((point, index) => {
+      if (!markerTimestamps.has(point.timestamp)) {
+        return null;
+      }
+      const event = events.find((entry) => entry.timestamp === point.timestamp);
+      const shortLabelMap = {
+        time_preset_applied: "Preset",
+        orchestrator_mode_applied: "Mode",
+        fault_injected: "Fault",
+        load_generator_completed: "Done",
+        policy_weight_shift: "Weight",
+        target_workers_shift: "Target",
+        scale_action_shift: "Scale",
+      };
+      return {
+        index,
+        shortLabel: shortLabelMap[event?.event_type] || "Event",
+      };
+    })
+    .filter(Boolean);
+
+  if (!systemPoints.length) {
+    renderEmptyChart(chartTargets.experimentPressureChart);
+    renderEmptyChart(chartTargets.experimentWorkerLoadChart);
+    renderEmptyChart(chartTargets.experimentPolicyWeightChart);
+    renderExperimentEventTimeline(eventsPayload);
+    return;
+  }
+
+  const workerIds = Array.from(new Set(workerPoints.map((point) => point.worker_id).filter(Boolean)));
+  const workerSeries = (selector) =>
+    workerIds.map((workerId, index) => ({
+      label: workerId,
+      color: workerColor(workerId, index),
+      values: systemPoints.map((systemPoint) => {
+        const workerPoint = workerPoints.find(
+          (point) => point.worker_id === workerId && point.timestamp === systemPoint.timestamp
+        );
+        return workerPoint ? selector(workerPoint) : 0;
+      }),
+    }));
+
+  renderLineChart(
+    chartTargets.experimentPressureChart,
+    "Run Pressure",
+    labels,
+    [
+      {
+        label: "Max Queue Depth",
+        color: "#9b6a12",
+        values: systemPoints.map((point) => point.max_queue_depth ?? 0),
+      },
+      {
+        label: "Max Predicted Pressure",
+        color: "#1d6b45",
+        values: systemPoints.map((point) => point.max_predicted_pressure ?? 0),
+      },
+      {
+        label: "Target Workers",
+        color: "#93348f",
+        values: systemPoints.map((point) => point.target_workers ?? 0),
+      },
+    ],
+    markers
+  );
+
+  renderLineChart(
+    chartTargets.experimentWorkerLoadChart,
+    "Run Worker Load",
+    labels,
+    workerSeries((point) => point.load_score ?? 0),
+    markers
+  );
+
+  renderLineChart(
+    chartTargets.experimentPolicyWeightChart,
+    "Run Policy Weights",
+    labels,
+    workerSeries((point) => point.policy_weight ?? 0),
+    markers
+  );
+
+  renderExperimentEventTimeline(eventsPayload);
+}
+
+function populateScenarioSelect(scenarios) {
+  experimentScenarios = scenarios || [];
+  scenarioSelect.innerHTML = experimentScenarios
+    .map(
+      (scenario) =>
+        `<option value="${scenario.scenario_id}">${scenario.scenario_id} - ${scenario.description || "scenario"}</option>`
+    )
+    .join("");
 }
 
 function renderTimeEvents(historyPoints) {
@@ -249,6 +602,122 @@ async function applyTimePreset(preset) {
   }
   modeStatus.textContent = `Jumped to ${preset}.`;
   await refreshAll();
+}
+
+async function loadExperimentScenarios() {
+  const response = await fetch("/api/experiments/scenarios");
+  if (!response.ok) {
+    experimentStatus.textContent = `Scenario load failed: ${await response.text()}`;
+    return;
+  }
+  const payload = await response.json();
+  populateScenarioSelect(payload.scenarios || []);
+  if ((payload.scenarios || []).length) {
+    experimentStatus.textContent = `Loaded ${payload.count} scenarios.`;
+  } else {
+    experimentStatus.textContent = "No experiment scenarios available.";
+  }
+}
+
+async function refreshExperimentComparison() {
+  const scenarioId = scenarioSelect.value;
+  if (!scenarioId) {
+    experimentStatus.textContent = "Select a scenario first.";
+    return;
+  }
+  const response = await fetch(`/api/experiments/comparisons/${scenarioId}`);
+  if (!response.ok) {
+    experimentStatus.textContent = `Comparison refresh failed: ${await response.text()}`;
+    return;
+  }
+  const comparison = await response.json();
+  renderComparisonTable(comparison);
+  renderExperimentCharts(comparison);
+  const latestRun = selectLatestRunFromComparison(comparison);
+  if (latestRun?.run_id) {
+    await loadExperimentRunArtifacts(latestRun.run_id);
+  }
+  experimentStatus.textContent = `Comparison refreshed for ${scenarioId}.`;
+}
+
+async function loadExperimentRunArtifacts(runId) {
+  const response = await fetch(`/api/experiments/runs/${runId}/artifacts`);
+  if (!response.ok) {
+    experimentStatus.textContent = `Run artifact load failed: ${await response.text()}`;
+    return;
+  }
+  latestExperimentArtifacts = await response.json();
+  latestExperimentEvents = {
+    run_id: runId,
+    count: (latestExperimentArtifacts.events || []).length,
+    events: latestExperimentArtifacts.events || [],
+  };
+  renderLatestRunSummary(latestExperimentArtifacts.metadata, { summary: latestExperimentArtifacts.summary }, latestExperimentArtifacts);
+  renderExperimentRunCharts(latestExperimentArtifacts, latestExperimentEvents);
+}
+
+async function runExperiment() {
+  const scenarioId = scenarioSelect.value;
+  const mode = experimentModeSelect.value;
+  if (!scenarioId) {
+    experimentStatus.textContent = "Select a scenario first.";
+    return;
+  }
+  experimentStatus.textContent = `Running ${scenarioId} in ${mode}...`;
+  runExperimentButton.disabled = true;
+  try {
+    const response = await fetch("/api/experiments/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario_id: scenarioId, mode }),
+    });
+    if (!response.ok) {
+      experimentStatus.textContent = `Experiment run failed: ${await response.text()}`;
+      return;
+    }
+    const payload = await response.json();
+    latestExperimentEvents = payload.events;
+    latestExperimentArtifacts = payload.artifacts;
+    renderLatestRunSummary(payload.run, payload.execution, latestExperimentArtifacts);
+    renderComparisonTable(payload.comparison);
+    renderExperimentCharts(payload.comparison);
+    renderExperimentRunCharts(latestExperimentArtifacts, latestExperimentEvents);
+    experimentStatus.textContent = `Completed ${scenarioId} in ${mode}.`;
+  } finally {
+    runExperimentButton.disabled = false;
+  }
+}
+
+async function runExperimentBatch() {
+  const scenarioId = scenarioSelect.value;
+  const repeatCount = Number(experimentRepeatCountSelect.value || 2);
+  if (!scenarioId) {
+    experimentStatus.textContent = "Select a scenario first.";
+    return;
+  }
+  experimentStatus.textContent = `Running repeated batch for ${scenarioId}...`;
+  runBatchExperimentButton.disabled = true;
+  try {
+    const response = await fetch("/api/experiments/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scenario_id: scenarioId,
+        modes: ["round_robin", "least_connections", "predictive_rules"],
+        repeat_count: repeatCount,
+      }),
+    });
+    if (!response.ok) {
+      experimentStatus.textContent = `Batch run failed: ${await response.text()}`;
+      return;
+    }
+    latestExperimentBatch = await response.json();
+    renderBatchAggregateSummary(latestExperimentBatch);
+    await refreshExperimentComparison();
+    experimentStatus.textContent = `Completed repeated batch for ${scenarioId}.`;
+  } finally {
+    runBatchExperimentButton.disabled = false;
+  }
 }
 
 function nextWeekdayPeakTimestamp() {
@@ -726,6 +1195,9 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyTimePreset(button.dataset.preset));
 });
 refreshButton.addEventListener("click", refreshAll);
+runExperimentButton.addEventListener("click", runExperiment);
+runBatchExperimentButton.addEventListener("click", runExperimentBatch);
+refreshComparisonButton.addEventListener("click", refreshExperimentComparison);
 previewSaleButton.addEventListener("click", () =>
   previewRecommendationWindow(
     {
@@ -749,5 +1221,8 @@ previewWeekdayButton.addEventListener("click", () =>
   )
 );
 
+loadExperimentScenarios();
 refreshAll();
+renderExperimentRunCharts(null, null);
+renderBatchAggregateSummary(null);
 setInterval(refreshAll, 5000);

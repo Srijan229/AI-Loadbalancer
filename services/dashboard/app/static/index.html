@@ -119,6 +119,102 @@
 
       <section class="panel">
         <div class="panel-header">
+          <h2>Experiment Lab</h2>
+          <p class="panel-note">Run reproducible scenarios and compare orchestration strategies.</p>
+        </div>
+        <div class="experiment-controls">
+          <label class="control-field">
+            <span>Scenario</span>
+            <select id="scenarioSelect"></select>
+          </label>
+          <label class="control-field">
+            <span>Mode</span>
+            <select id="experimentModeSelect">
+              <option value="round_robin">round_robin</option>
+              <option value="least_connections">least_connections</option>
+              <option value="predictive_rules" selected>predictive_rules</option>
+              <option value="agentic">agentic</option>
+            </select>
+          </label>
+          <label class="control-field">
+            <span>Repeat Count</span>
+            <select id="experimentRepeatCountSelect">
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <div class="experiment-actions">
+            <button id="runExperimentButton" class="worker-action accent">Run Scenario</button>
+            <button id="runBatchExperimentButton" class="worker-action accent">Run Repeated Batch</button>
+            <button id="refreshComparisonButton" class="worker-action">Refresh Comparison</button>
+          </div>
+        </div>
+        <p id="experimentStatus" class="status-text">Waiting for scenario data.</p>
+        <div class="panel experiment-subpanel">
+          <div class="panel-header">
+            <h3>Batch Aggregate</h3>
+          </div>
+          <div id="batchAggregateSummary" class="strategic-grid"></div>
+        </div>
+        <div class="grid two-up">
+          <div class="panel experiment-subpanel">
+            <div class="panel-header">
+              <h3>Latest Run</h3>
+            </div>
+            <div id="latestRunSummary" class="strategic-grid"></div>
+          </div>
+          <div class="panel experiment-subpanel">
+            <div class="panel-header">
+              <h3>Comparison Table</h3>
+            </div>
+            <div id="comparisonTableWrap" class="comparison-table-wrap"></div>
+          </div>
+        </div>
+        <div class="charts-grid experiment-chart-grid">
+          <article class="chart-card">
+            <h3>Latency Comparison</h3>
+            <p class="chart-copy">P95 latency by orchestration mode for the selected scenario.</p>
+            <div id="comparisonLatencyChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Throughput Comparison</h3>
+            <p class="chart-copy">Average throughput by orchestration mode for the selected scenario.</p>
+            <div id="comparisonThroughputChart" class="chart-surface"></div>
+          </article>
+        </div>
+        <div class="panel experiment-subpanel">
+          <div class="panel-header">
+            <h3>Latest Run Detail</h3>
+            <p class="panel-note">Stored telemetry samples and event flow for the most recent executed run.</p>
+          </div>
+          <div class="charts-grid experiment-chart-grid">
+            <article class="chart-card">
+              <h3>Run Pressure</h3>
+              <p class="chart-copy">Queue buildup, predicted pressure, and worker targets during the run.</p>
+              <div id="experimentPressureChart" class="chart-surface"></div>
+            </article>
+            <article class="chart-card">
+              <h3>Run Worker Load</h3>
+              <p class="chart-copy">Per-worker load score from stored experiment samples.</p>
+              <div id="experimentWorkerLoadChart" class="chart-surface"></div>
+            </article>
+            <article class="chart-card">
+              <h3>Run Policy Weights</h3>
+              <p class="chart-copy">Per-worker policy weight shifts during the run.</p>
+              <div id="experimentPolicyWeightChart" class="chart-surface"></div>
+            </article>
+            <article class="chart-card">
+              <h3>Run Event Timeline</h3>
+              <p class="chart-copy">Scenario preparation, injected faults, and load completion events.</p>
+              <div id="experimentEventsList" class="time-events-list compact"></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
           <h2>Live Graphs</h2>
           <p class="panel-note">Rolling telemetry history from the dashboard buffer.</p>
         </div>

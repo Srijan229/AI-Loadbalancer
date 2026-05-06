@@ -1,0 +1,21 @@
+{
+  "scenario_id": "smoke_fault",
+  "description": "Short smoke test with light traffic and a brief latency injection on worker-a.",
+  "time_preset": null,
+  "load_profile": {
+    "type": "constant",
+    "users": 8,
+    "spawn_rate": 4,
+    "duration_seconds": 20,
+    "target_rps": 12
+  },
+  "failure_plan": [
+    {
+      "type": "latency_injection",
+      "target": "worker-a",
+      "delay_ms": 400,
+      "at_second": 5,
+      "duration_seconds": 10
+    }
+  ]
+}

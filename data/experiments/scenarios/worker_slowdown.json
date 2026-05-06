@@ -1,0 +1,21 @@
+{
+  "scenario_id": "worker_slowdown",
+  "description": "Moderate steady load with an injected latency fault on worker-a.",
+  "time_preset": null,
+  "load_profile": {
+    "type": "constant",
+    "users": 24,
+    "spawn_rate": 8,
+    "duration_seconds": 120,
+    "target_rps": 50
+  },
+  "failure_plan": [
+    {
+      "type": "latency_injection",
+      "target": "worker-a",
+      "delay_ms": 800,
+      "at_second": 30,
+      "duration_seconds": 60
+    }
+  ]
+}

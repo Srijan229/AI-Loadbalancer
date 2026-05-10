@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: experiment-runner
-          image: ai-loadbalancer-experiment-runner:lab-v1
+          image: ai-loadbalancer-experiment-runner:lab-v2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8007

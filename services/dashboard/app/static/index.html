@@ -119,6 +119,37 @@
 
       <section class="panel">
         <div class="panel-header">
+          <h2>Infrastructure Control</h2>
+          <p class="panel-note">Simulated EC2 Auto Scaling state for free-tier demo flow.</p>
+        </div>
+        <div class="experiment-controls">
+          <div class="experiment-actions">
+            <button id="infraSimulateButton" class="worker-action accent">Simulate Mode</button>
+            <button id="infraAwsButton" class="worker-action">AWS Execute</button>
+            <button id="infraSyncButton" class="worker-action accent">Sync Recommendation</button>
+            <button id="infraExecuteButton" class="worker-action">Execute Plan</button>
+            <button id="infraResetButton" class="worker-action">Reset Infra</button>
+          </div>
+        </div>
+        <p id="infraStatus" class="status-text">Waiting for infrastructure state.</p>
+        <div class="grid two-up">
+          <div class="panel experiment-subpanel">
+            <div class="panel-header">
+              <h3>Infrastructure State</h3>
+            </div>
+            <div id="infrastructureState" class="strategic-grid"></div>
+          </div>
+          <div class="panel experiment-subpanel">
+            <div class="panel-header">
+              <h3>Infrastructure Actions</h3>
+            </div>
+            <div id="infrastructureActionsList" class="time-events-list compact"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
           <h2>Experiment Lab</h2>
           <p class="panel-note">Run reproducible scenarios and compare orchestration strategies.</p>
         </div>
@@ -258,6 +289,11 @@
             <h3>Recommended Capacity</h3>
             <p class="chart-copy">Target worker count from the strategic recommendation over time.</p>
             <div id="capacityChart" class="chart-surface"></div>
+          </article>
+          <article class="chart-card">
+            <h3>Infrastructure Capacity</h3>
+            <p class="chart-copy">Current, desired, and pending instance counts in the simulated ASG.</p>
+            <div id="infrastructureCapacityChart" class="chart-surface"></div>
           </article>
         </div>
       </section>

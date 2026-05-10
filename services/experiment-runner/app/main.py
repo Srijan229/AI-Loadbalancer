@@ -57,6 +57,9 @@ class ExperimentRunnerState:
         self.worker_urls_by_id = self._load_worker_endpoints()
         self.client: httpx.AsyncClient | None = None
         self.sample_interval_seconds = float(os.getenv("RUN_SAMPLE_INTERVAL_SECONDS", "2"))
+        self.default_orchestrator_mode = os.getenv("DEFAULT_ORCHESTRATOR_MODE", "round_robin").strip()
+        self.execution_lock = asyncio.Lock()
+        self.active_control_owner: str | None = None
         self.scenarios_dir.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.comparisons_dir.mkdir(parents=True, exist_ok=True)
@@ -231,7 +234,59 @@ class ExperimentRunnerState:
             handle.write(json.dumps(payload))
             handle.write("\n")
 
-    async def prepare_run(self, run_id: str) -> dict[str, Any]:
+    async def _acquire_control_plane(self, owner_id: str) -> None:
+        if self.active_control_owner == owner_id:
+            return
+        if self.active_control_owner is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Control plane is currently owned by '{self.active_control_owner}'. Wait for that run or batch to finish.",
+            )
+        await self.execution_lock.acquire()
+        self.active_control_owner = owner_id
+
+    async def _release_control_plane(self, owner_id: str) -> None:
+        if self.active_control_owner != owner_id:
+            return
+        self.active_control_owner = None
+        if self.execution_lock.locked():
+            self.execution_lock.release()
+
+    async def _reset_control_plane(self, run_id: str, owner_id: str) -> None:
+        if self.client is None:
+            return
+        timestamp = datetime.now(UTC).isoformat()
+        try:
+            time_response = await self.client.post(f"{self.time_controller_url}/time/resume")
+            time_response.raise_for_status()
+            mode_response = await self.client.post(
+                f"{self.orchestrator_url}/mode",
+                json={"mode": self.default_orchestrator_mode},
+            )
+            mode_response.raise_for_status()
+            self.append_event(
+                run_id,
+                {
+                    "timestamp": timestamp,
+                    "event_type": "control_plane_reset",
+                    "payload": {
+                        "owner_id": owner_id,
+                        "time_state": time_response.json(),
+                        "mode_state": mode_response.json(),
+                    },
+                },
+            )
+        except httpx.HTTPError as exc:
+            self.append_event(
+                run_id,
+                {
+                    "timestamp": timestamp,
+                    "event_type": "control_plane_reset_error",
+                    "payload": {"owner_id": owner_id, "error": str(exc)},
+                },
+            )
+
+    async def prepare_run(self, run_id: str, owner_id: str | None = None) -> dict[str, Any]:
         if self.client is None:
             raise RuntimeError("Experiment runner HTTP client is not initialized.")
 
@@ -248,8 +303,10 @@ class ExperimentRunnerState:
                 detail=f"Run '{run_id}' cannot be prepared from status '{metadata['status']}'.",
             )
 
+        owner_id = owner_id or run_id
         prepared_at = datetime.now(UTC).isoformat()
         try:
+            await self._acquire_control_plane(owner_id)
             time_preset = metadata["time_context"].get("preset")
             if time_preset:
                 time_response = await self.client.post(
@@ -299,13 +356,18 @@ class ExperimentRunnerState:
             recommendation_response.raise_for_status()
             recommendation_payload = recommendation_response.json()
         except httpx.HTTPError as exc:
+            await self._release_control_plane(owner_id)
             raise HTTPException(
                 status_code=502,
                 detail=f"Run preparation failed because a control-plane dependency was unreachable: {exc}",
             ) from exc
+        except Exception:
+            await self._release_control_plane(owner_id)
+            raise
 
         metadata["status"] = "prepared"
         metadata["prepared_at"] = prepared_at
+        metadata["control_owner"] = owner_id
         metadata["time_context"]["controller_mode"] = time_payload.get("mode")
         metadata["time_context"]["effective_time_utc"] = recommendation_payload.get("effective_time_utc")
         metadata["execution"] = {
@@ -327,7 +389,12 @@ class ExperimentRunnerState:
         )
         return metadata
 
-    async def execute_run(self, run_id: str) -> dict[str, Any]:
+    async def execute_run(
+        self,
+        run_id: str,
+        owner_id: str | None = None,
+        release_control: bool = True,
+    ) -> dict[str, Any]:
         if self.client is None:
             raise RuntimeError("Experiment runner HTTP client is not initialized.")
 
@@ -336,6 +403,16 @@ class ExperimentRunnerState:
             raise HTTPException(
                 status_code=409,
                 detail=f"Run '{run_id}' cannot be executed from status '{metadata['status']}'.",
+            )
+
+        owner_id = owner_id or metadata.get("control_owner") or run_id
+        if self.active_control_owner != owner_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Run '{run_id}' does not own the control plane. "
+                    f"Active owner: '{self.active_control_owner}'."
+                ),
             )
 
         run_dir = self.runs_dir / run_id
@@ -360,63 +437,68 @@ class ExperimentRunnerState:
         sampler_task = asyncio.create_task(self._sample_run_state(run_id, stop_sampling))
         failure_task = asyncio.create_task(self._run_failure_plan(run_id, metadata.get("failure_plan", [])))
         try:
-            locust_result = await self._run_locust(run_id, load_profile, run_dir)
-            await failure_task
-        except Exception as exc:
-            stop_sampling.set()
             try:
-                await sampler_task
-            except Exception:
-                pass
-            failure_task.cancel()
-            metadata["status"] = "failed"
-            metadata["ended_at"] = datetime.now(UTC).isoformat()
-            metadata["error"] = str(exc)
+                locust_result = await self._run_locust(run_id, load_profile, run_dir)
+                await failure_task
+            except Exception as exc:
+                stop_sampling.set()
+                try:
+                    await sampler_task
+                except Exception:
+                    pass
+                failure_task.cancel()
+                metadata["status"] = "failed"
+                metadata["ended_at"] = datetime.now(UTC).isoformat()
+                metadata["error"] = str(exc)
+                self.update_run_metadata(run_id, metadata)
+                self.append_event(
+                    run_id,
+                    {
+                        "timestamp": metadata["ended_at"],
+                        "event_type": "run_failed",
+                        "payload": {"error": str(exc)},
+                    },
+                )
+                raise
+
+            stop_sampling.set()
+            await sampler_task
+            ended_at = datetime.now(UTC).isoformat()
+            summary = self._build_summary(run_id, metadata, locust_result)
+            with self.summary_path(run_id).open("w", encoding="utf-8") as handle:
+                json.dump(summary, handle, indent=2)
+                handle.write("\n")
+
+            metadata["status"] = "completed" if locust_result["returncode"] == 0 else "failed"
+            metadata["ended_at"] = ended_at
+            metadata["artifacts"] = {
+                "locust_stdout": locust_result["stdout_path"],
+                "locust_stderr": locust_result["stderr_path"],
+                "locust_csv_prefix": locust_result["csv_prefix"],
+                "summary_path": str(self.summary_path(run_id)),
+            }
             self.update_run_metadata(run_id, metadata)
             self.append_event(
                 run_id,
                 {
-                    "timestamp": metadata["ended_at"],
-                    "event_type": "run_failed",
-                    "payload": {"error": str(exc)},
+                    "timestamp": ended_at,
+                    "event_type": "run_execution_completed",
+                    "payload": {
+                        "returncode": locust_result["returncode"],
+                        "summary": summary,
+                    },
                 },
             )
-            raise
-
-        stop_sampling.set()
-        await sampler_task
-        ended_at = datetime.now(UTC).isoformat()
-        summary = self._build_summary(run_id, metadata, locust_result)
-        with self.summary_path(run_id).open("w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2)
-            handle.write("\n")
-
-        metadata["status"] = "completed" if locust_result["returncode"] == 0 else "failed"
-        metadata["ended_at"] = ended_at
-        metadata["artifacts"] = {
-            "locust_stdout": locust_result["stdout_path"],
-            "locust_stderr": locust_result["stderr_path"],
-            "locust_csv_prefix": locust_result["csv_prefix"],
-            "summary_path": str(self.summary_path(run_id)),
-        }
-        self.update_run_metadata(run_id, metadata)
-        self.append_event(
-            run_id,
-            {
-                "timestamp": ended_at,
-                "event_type": "run_execution_completed",
-                "payload": {
-                    "returncode": locust_result["returncode"],
-                    "summary": summary,
-                },
-            },
-        )
-        return {
-            "run_id": run_id,
-            "status": metadata["status"],
-            "summary": summary,
-            "artifacts": metadata["artifacts"],
-        }
+            return {
+                "run_id": run_id,
+                "status": metadata["status"],
+                "summary": summary,
+                "artifacts": metadata["artifacts"],
+            }
+        finally:
+            await self._reset_control_plane(run_id, owner_id)
+            if release_control:
+                await self._release_control_plane(owner_id)
 
     async def _sample_run_state(self, run_id: str, stop_event: asyncio.Event) -> None:
         if self.client is None:
@@ -820,33 +902,41 @@ class ExperimentRunnerState:
 
         started_at = datetime.now(UTC).isoformat()
         results: list[dict[str, Any]] = []
-        for repeat_index in range(1, payload.repeat_count + 1):
-            for mode in modes:
-                run_metadata = self.create_run(RunCreateRequest(scenario_id=payload.scenario_id, mode=mode))
-                prepared = await self.prepare_run(run_metadata["run_id"])
-                execution = await self.execute_run(run_metadata["run_id"])
-                results.append(
-                    {
-                        "repeat_index": repeat_index,
-                        "mode": mode,
-                        "run_id": run_metadata["run_id"],
-                        "prepared_status": prepared["status"],
-                        "execution_status": execution["status"],
-                        "summary": execution["summary"],
-                    }
-                )
+        await self._acquire_control_plane(batch_id)
+        try:
+            for repeat_index in range(1, payload.repeat_count + 1):
+                for mode in modes:
+                    run_metadata = self.create_run(RunCreateRequest(scenario_id=payload.scenario_id, mode=mode))
+                    prepared = await self.prepare_run(run_metadata["run_id"], owner_id=batch_id)
+                    execution = await self.execute_run(
+                        run_metadata["run_id"],
+                        owner_id=batch_id,
+                        release_control=False,
+                    )
+                    results.append(
+                        {
+                            "repeat_index": repeat_index,
+                            "mode": mode,
+                            "run_id": run_metadata["run_id"],
+                            "prepared_status": prepared["status"],
+                            "execution_status": execution["status"],
+                            "summary": execution["summary"],
+                        }
+                    )
 
-        aggregate = self._build_batch_aggregate(batch_id, payload.scenario_id, modes, payload.repeat_count, results)
-        with self.batch_summary_path(batch_id).open("w", encoding="utf-8") as handle:
-            json.dump(aggregate, handle, indent=2)
-            handle.write("\n")
+            aggregate = self._build_batch_aggregate(batch_id, payload.scenario_id, modes, payload.repeat_count, results)
+            with self.batch_summary_path(batch_id).open("w", encoding="utf-8") as handle:
+                json.dump(aggregate, handle, indent=2)
+                handle.write("\n")
 
-        aggregate["started_at"] = started_at
-        aggregate["ended_at"] = datetime.now(UTC).isoformat()
-        with self.batch_summary_path(batch_id).open("w", encoding="utf-8") as handle:
-            json.dump(aggregate, handle, indent=2)
-            handle.write("\n")
-        return aggregate
+            aggregate["started_at"] = started_at
+            aggregate["ended_at"] = datetime.now(UTC).isoformat()
+            with self.batch_summary_path(batch_id).open("w", encoding="utf-8") as handle:
+                json.dump(aggregate, handle, indent=2)
+                handle.write("\n")
+            return aggregate
+        finally:
+            await self._release_control_plane(batch_id)
 
     def _build_batch_aggregate(
         self,
@@ -934,6 +1024,8 @@ async def health() -> dict[str, Any]:
         "dashboard_url": state.dashboard_url,
         "orchestrator_url": state.orchestrator_url,
         "time_controller_url": state.time_controller_url,
+        "active_control_owner": state.active_control_owner,
+        "default_orchestrator_mode": state.default_orchestrator_mode,
     }
 
 

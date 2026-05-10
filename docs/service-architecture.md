@@ -57,6 +57,12 @@ Stage 1 is split into a `data plane` and a `control plane`.
 - runs repeatable benchmark scenarios
 - drives traffic patterns and records mode comparisons
 
+#### `infrastructure-controller`
+- translates orchestrator scale recommendations into infrastructure actions
+- defaults to a simulated AWS Auto Scaling Group for free-tier demos
+- keeps current, desired, and pending instance state
+- exposes an `aws_execute` placeholder path for later real EC2 integration
+
 ### Infrastructure Services
 
 #### `redis`
@@ -85,6 +91,8 @@ Stage 1 is split into a `data plane` and a `control plane`.
 5. `orchestrator` reads live state and predictions
 6. `orchestrator` publishes a routing policy
 7. `gateway` refreshes and applies that policy locally
+8. `infrastructure-controller` can sync the strategic `scale_recommendation`
+9. `infrastructure-controller` applies simulated capacity changes for demo proof
 
 ## Orchestrator V1 Boundary
 

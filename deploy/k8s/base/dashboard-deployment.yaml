@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: dashboard
-          image: ai-loadbalancer-dashboard:lab-v1
+          image: ai-loadbalancer-dashboard:lab-v2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8010
@@ -31,6 +31,8 @@ spec:
               value: http://time-controller:8006
             - name: EXPERIMENT_RUNNER_URL
               value: http://experiment-runner:8007
+            - name: INFRASTRUCTURE_CONTROLLER_URL
+              value: http://infrastructure-controller:8008
             - name: WORKER_URLS
               value: http://worker-a:8000,http://worker-b:8000
           readinessProbe:

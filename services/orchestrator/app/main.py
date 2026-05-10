@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -12,6 +13,14 @@ from starlette.responses import Response
 
 SUPPORTED_MODES = {"round_robin", "least_connections", "predictive"}
 STRATEGIC_INTERVALS = int(os.getenv("STRATEGIC_FORECAST_INTERVALS", "4"))
+PREDICTIVE_WEIGHT_SMOOTHING = float(os.getenv("PREDICTIVE_WEIGHT_SMOOTHING", "0.35"))
+PREDICTIVE_WEIGHT_HYSTERESIS = float(os.getenv("PREDICTIVE_WEIGHT_HYSTERESIS", "0.08"))
+PREDICTIVE_MAX_WEIGHT_STEP = float(os.getenv("PREDICTIVE_MAX_WEIGHT_STEP", "0.18"))
+PREDICTIVE_MIN_HEALTHY_WEIGHT = float(os.getenv("PREDICTIVE_MIN_HEALTHY_WEIGHT", "0.2"))
+PREDICTIVE_MAX_HEALTHY_WEIGHT = float(os.getenv("PREDICTIVE_MAX_HEALTHY_WEIGHT", "0.65"))
+PREDICTIVE_WEIGHT_QUANTIZATION = float(os.getenv("PREDICTIVE_WEIGHT_QUANTIZATION", "0.05"))
+PREDICTIVE_REBALANCE_INTERVAL_SECONDS = float(os.getenv("PREDICTIVE_REBALANCE_INTERVAL_SECONDS", "6"))
+PREDICTIVE_EMERGENCY_DELTA = float(os.getenv("PREDICTIVE_EMERGENCY_DELTA", "0.22"))
 
 
 class ModeUpdateRequest(BaseModel):
@@ -42,6 +51,8 @@ class OrchestratorState:
         self.predictor_url = os.getenv("PREDICTOR_URL", "").strip().rstrip("/")
         self.historical_forecaster_url = os.getenv("HISTORICAL_FORECASTER_URL", "").strip().rstrip("/")
         self.time_controller_url = os.getenv("TIME_CONTROLLER_URL", "").strip().rstrip("/")
+        self.previous_predictive_weights = {worker_url: 1.0 / len(self.worker_urls) for worker_url in self.worker_urls}
+        self.last_predictive_rebalance_at = 0.0
         self.client: httpx.AsyncClient | None = None
 
     @staticmethod
@@ -109,6 +120,7 @@ class OrchestratorState:
         if not healthy_workers:
             healthy_workers = worker_records
 
+        stabilized_weights: dict[str, float] = {}
         if self.mode == "predictive":
             strategic_bias = self._strategic_bias(strategic_summary)
             inverse_pressures: dict[str, float] = {}
@@ -117,8 +129,17 @@ class OrchestratorState:
                 adjusted_pressure = max(predicted_pressure, 0.1) * strategic_bias
                 inverse_pressures[worker["worker_url"]] = 1.0 / adjusted_pressure
             total_inverse_pressure = sum(inverse_pressures.values()) or float(len(healthy_workers))
+            target_weights = {
+                worker["worker_url"]: inverse_pressures[worker["worker_url"]] / total_inverse_pressure
+                for worker in healthy_workers
+            }
+            stabilized_weights = self._stabilize_predictive_weights(target_weights, healthy_workers)
         else:
             total_inverse_pressure = float(len(healthy_workers))
+            self.previous_predictive_weights = {
+                worker_url: (1.0 / len(self.worker_urls)) for worker_url in self.worker_urls
+            }
+            self.last_predictive_rebalance_at = 0.0
 
         workers: list[dict[str, Any]] = []
         healthy_worker_urls = {worker["worker_url"] for worker in healthy_workers}
@@ -127,12 +148,12 @@ class OrchestratorState:
             worker_url = worker["worker_url"]
             healthy = worker_url in healthy_worker_urls
             if self.mode == "predictive" and healthy:
-                weight = round(inverse_pressures[worker_url] / total_inverse_pressure, 4)
+                weight = round(stabilized_weights[worker_url], 4)
                 demand_level = (strategic_summary or {}).get("demand_level", "normal")
                 if demand_level in {"elevated", "surge"}:
-                    reason = f"predicted_pressure_weight_{demand_level}_window"
+                    reason = f"predicted_pressure_weight_stabilized_{demand_level}_window"
                 else:
-                    reason = "predicted_pressure_weight"
+                    reason = "predicted_pressure_weight_stabilized"
             elif healthy:
                 weight = round(1.0 / total_inverse_pressure, 4)
                 reason = "static_baseline_policy"
@@ -149,6 +170,86 @@ class OrchestratorState:
                 ).model_dump()
             )
         return workers
+
+    def _stabilize_predictive_weights(
+        self,
+        target_weights: dict[str, float],
+        healthy_workers: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        healthy_worker_urls = [worker["worker_url"] for worker in healthy_workers]
+        healthy_count = len(healthy_worker_urls)
+        if healthy_count == 0:
+            return {worker_url: 0.0 for worker_url in self.worker_urls}
+
+        min_weight = min(PREDICTIVE_MIN_HEALTHY_WEIGHT, 1.0 / healthy_count)
+        max_weight = max(min(PREDICTIVE_MAX_HEALTHY_WEIGHT, 1.0), min_weight)
+        previous_weights = {
+            worker_url: self.previous_predictive_weights.get(worker_url, 1.0 / healthy_count)
+            for worker_url in healthy_worker_urls
+        }
+        max_target_delta = max(
+            abs(target_weights.get(worker_url, previous_weights[worker_url]) - previous_weights[worker_url])
+            for worker_url in healthy_worker_urls
+        )
+        now = time.monotonic()
+        if (
+            self.last_predictive_rebalance_at > 0
+            and (now - self.last_predictive_rebalance_at) < PREDICTIVE_REBALANCE_INTERVAL_SECONDS
+            and max_target_delta < PREDICTIVE_EMERGENCY_DELTA
+        ):
+            return previous_weights
+
+        stabilized: dict[str, float] = {}
+
+        for worker_url in healthy_worker_urls:
+            previous = previous_weights[worker_url]
+            target = target_weights.get(worker_url, previous)
+            smoothed = previous + ((target - previous) * PREDICTIVE_WEIGHT_SMOOTHING)
+            delta = smoothed - previous
+            if abs(target - previous) < PREDICTIVE_WEIGHT_HYSTERESIS:
+                smoothed = previous
+            elif abs(delta) > PREDICTIVE_MAX_WEIGHT_STEP:
+                smoothed = previous + (PREDICTIVE_MAX_WEIGHT_STEP if delta > 0 else -PREDICTIVE_MAX_WEIGHT_STEP)
+            stabilized[worker_url] = min(max(smoothed, min_weight), max_weight)
+
+        total = sum(stabilized.values()) or float(healthy_count)
+        normalized = {
+            worker_url: stabilized[worker_url] / total
+            for worker_url in healthy_worker_urls
+        }
+        quantized = self._quantize_weights(normalized, healthy_worker_urls, min_weight, max_weight)
+
+        self.previous_predictive_weights = {
+            worker_url: quantized.get(worker_url, 0.0)
+            for worker_url in self.worker_urls
+        }
+        self.last_predictive_rebalance_at = now
+        return quantized
+
+    def _quantize_weights(
+        self,
+        weights: dict[str, float],
+        healthy_worker_urls: list[str],
+        min_weight: float,
+        max_weight: float,
+    ) -> dict[str, float]:
+        if PREDICTIVE_WEIGHT_QUANTIZATION <= 0:
+            return weights
+
+        quantized = {
+            worker_url: round(weights[worker_url] / PREDICTIVE_WEIGHT_QUANTIZATION) * PREDICTIVE_WEIGHT_QUANTIZATION
+            for worker_url in healthy_worker_urls
+        }
+        quantized = {
+            worker_url: min(max(weight, min_weight), max_weight)
+            for worker_url, weight in quantized.items()
+        }
+        total = sum(quantized.values()) or float(len(healthy_worker_urls))
+        normalized = {
+            worker_url: quantized[worker_url] / total
+            for worker_url in healthy_worker_urls
+        }
+        return normalized
 
     async def fetch_collector_snapshot(self) -> dict[str, Any] | None:
         if not self.metrics_collector_url or self.client is None:

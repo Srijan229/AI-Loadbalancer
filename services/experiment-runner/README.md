@@ -29,6 +29,21 @@ It does not yet:
 
 - package scenario data into a Kubernetes deployment
 
+## Execution Isolation
+
+The runner now treats the orchestrator and time-controller as shared global state.
+
+That means:
+
+- only one run or batch can own the control plane at a time
+- overlapping prepares/executions are rejected with `409`
+- each run resets:
+  - time-controller back to `realtime`
+  - orchestrator back to `round_robin`
+  before releasing control
+
+This prevents concurrent runs from corrupting each other's mode or time preset.
+
 ## Endpoints
 
 - `GET /health`

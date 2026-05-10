@@ -586,3 +586,74 @@ Response:
   ]
 }
 ```
+
+## Dashboard Infrastructure Proxy
+
+### `GET /api/infrastructure/state`
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "service": "infrastructure-controller",
+  "mode": "simulate",
+  "provider": "aws",
+  "group_name": "ai-loadbalancer-workers",
+  "current_instances": 2,
+  "desired_instances": 3,
+  "pending_instances": 1,
+  "pending_scale_down": 0,
+  "cooldown_remaining_seconds": 21.4,
+  "last_action": "pre_scale_up",
+  "pending_plan": null
+}
+```
+
+### `GET /api/infrastructure/actions`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-05-07T18:22:00Z",
+  "count": 2,
+  "actions": [
+    {
+      "timestamp": "2026-05-07T18:21:10Z",
+      "mode": "simulate",
+      "action": "pre_scale_up",
+      "plan": {
+        "execute_target_instances": 3
+      },
+      "after": {
+        "current_instances": 2,
+        "desired_instances": 3,
+        "pending_instances": 1
+      }
+    }
+  ]
+}
+```
+
+### `POST /api/infrastructure/mode`
+
+Request:
+
+```json
+{
+  "mode": "simulate"
+}
+```
+
+### `POST /api/infrastructure/sync`
+
+Pulls the latest orchestrator `scale_recommendation` into a simulated ASG plan.
+
+### `POST /api/infrastructure/execute`
+
+Executes the current simulated infra plan.
+
+### `POST /api/infrastructure/reset`
+
+Clears pending transitions and resets desired capacity back to stable current capacity.

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infrastructure-controller
+  labels:
+    app: infrastructure-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infrastructure-controller
+  template:
+    metadata:
+      labels:
+        app: infrastructure-controller
+    spec:
+      containers:
+        - name: infrastructure-controller
+          image: ai-loadbalancer-infrastructure-controller:sim-v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8008
+              name: http
+          env:
+            - name: ORCHESTRATOR_URL
+              value: http://orchestrator:8002
+            - name: INFRA_MODE
+              value: simulate
+            - name: INFRA_PROVIDER
+              value: aws
+            - name: INFRA_GROUP_NAME
+              value: ai-loadbalancer-workers
+            - name: INFRA_MIN_INSTANCES
+              value: "1"
+            - name: INFRA_MAX_INSTANCES
+              value: "5"
+            - name: INFRA_CURRENT_INSTANCES
+              value: "2"
+            - name: INFRA_COOLDOWN_SECONDS
+              value: "45"
+            - name: INFRA_PROVISION_SECONDS
+              value: "30"
+            - name: INFRA_MAX_SCALE_STEP
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 6
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

@@ -68,6 +68,10 @@ class ExperimentBatchRequest(BaseModel):
     repeat_count: int = Field(default=2, ge=1, le=10)
 
 
+class InfraModeUpdateRequest(BaseModel):
+    mode: str
+
+
 class DashboardState:
     def __init__(self) -> None:
         self.gateway_url = _strip_url(os.getenv("GATEWAY_URL", "http://gateway:8001"))
@@ -79,6 +83,9 @@ class DashboardState:
         self.time_controller_url = _strip_url(os.getenv("TIME_CONTROLLER_URL", "http://time-controller:8006"))
         self.experiment_runner_url = _strip_url(
             os.getenv("EXPERIMENT_RUNNER_URL", "http://experiment-runner:8007")
+        )
+        self.infrastructure_controller_url = _strip_url(
+            os.getenv("INFRASTRUCTURE_CONTROLLER_URL", "http://infrastructure-controller:8008")
         )
         self.worker_urls = _load_urls("WORKER_URLS", "http://worker-a:8000,http://worker-b:8000")
         self.worker_urls_by_id = {_worker_id_from_url(worker_url): worker_url for worker_url in self.worker_urls}
@@ -109,6 +116,7 @@ class DashboardState:
             predictor_snapshot,
             policy_snapshot,
             time_snapshot,
+            infrastructure_state,
         ) = await self._fetch_all()
 
         prediction_by_worker = {
@@ -155,6 +163,12 @@ class DashboardState:
                     "service": "predictor",
                     "generated_at": predictor_snapshot.get("generated_at"),
                 },
+                "infrastructure_controller": {
+                    "status": infrastructure_state.get("status", "ok"),
+                    "service": "infrastructure-controller",
+                    "generated_at": infrastructure_state.get("generated_at"),
+                    "mode": infrastructure_state.get("mode"),
+                },
             },
             "control_plane": {
                 "mode": orchestrator_health.get("mode"),
@@ -165,6 +179,7 @@ class DashboardState:
                 "strategic_forecast": policy_snapshot.get("strategic_forecast"),
                 "scale_recommendation": policy_snapshot.get("scale_recommendation"),
                 "time": time_snapshot,
+                "infrastructure": infrastructure_state,
             },
             "data_plane": {
                 "gateway_mode": gateway_health.get("mode"),
@@ -177,6 +192,10 @@ class DashboardState:
                 "strategic_avg_expected_rps": (policy_snapshot.get("strategic_forecast") or {}).get("avg_expected_rps"),
                 "strategic_peak_expected_rps": (policy_snapshot.get("strategic_forecast") or {}).get("peak_expected_rps"),
                 "strategic_target_workers": (policy_snapshot.get("scale_recommendation") or {}).get("target_workers"),
+                "infra_current_instances": infrastructure_state.get("current_instances"),
+                "infra_desired_instances": infrastructure_state.get("desired_instances"),
+                "infra_pending_instances": infrastructure_state.get("pending_instances"),
+                "infra_cooldown_remaining_seconds": infrastructure_state.get("cooldown_remaining_seconds"),
             },
             "workers": workers,
         }
@@ -208,7 +227,9 @@ class DashboardState:
         response.raise_for_status()
         return response.json()
 
-    async def _fetch_all(self) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    async def _fetch_all(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
         assert self.client is not None
         try:
             (
@@ -218,6 +239,7 @@ class DashboardState:
                 predictor_snapshot,
                 policy_snapshot,
                 time_snapshot,
+                infrastructure_state,
             ) = await asyncio.gather(
                 self._fetch_json(f"{self.gateway_url}/health"),
                 self._fetch_json(f"{self.orchestrator_url}/health"),
@@ -225,6 +247,7 @@ class DashboardState:
                 self._fetch_json(f"{self.predictor_url}/predictions"),
                 self._fetch_json(f"{self.orchestrator_url}/policy"),
                 self._fetch_json(f"{self.time_controller_url}/time"),
+                self._fetch_json(f"{self.infrastructure_controller_url}/state"),
             )
             return (
                 gateway_health,
@@ -233,6 +256,7 @@ class DashboardState:
                 predictor_snapshot,
                 policy_snapshot,
                 time_snapshot,
+                infrastructure_state,
             )
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Dashboard dependency fetch failed: {exc}") from exc
@@ -459,6 +483,54 @@ class DashboardState:
             raise HTTPException(status_code=response.status_code, detail=response.text)
         return response.json()
 
+    async def fetch_infrastructure_state(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.infrastructure_controller_url}/state")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def fetch_infrastructure_actions(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.get(f"{self.infrastructure_controller_url}/actions")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def set_infrastructure_mode(self, mode: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.post(f"{self.infrastructure_controller_url}/mode", json={"mode": mode})
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def sync_infrastructure(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.post(f"{self.infrastructure_controller_url}/sync")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def execute_infrastructure(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.post(f"{self.infrastructure_controller_url}/execute")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+    async def reset_infrastructure(self) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("Dashboard HTTP client is not initialized.")
+        response = await self.client.post(f"{self.infrastructure_controller_url}/reset")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
 
 state = DashboardState()
 STATIC_DIR = Path(__file__).parent / "static"
@@ -510,6 +582,7 @@ async def health() -> dict[str, Any]:
         "predictor_url": state.predictor_url,
         "time_controller_url": state.time_controller_url,
         "experiment_runner_url": state.experiment_runner_url,
+        "infrastructure_controller_url": state.infrastructure_controller_url,
         "worker_ids": sorted(state.worker_urls_by_id),
     }
 
@@ -617,3 +690,33 @@ async def run_experiment_batch(payload: ExperimentBatchRequest) -> dict[str, Any
 @app.get("/api/experiments/batches/{batch_id}")
 async def get_experiment_batch(batch_id: str) -> dict[str, Any]:
     return await state.fetch_experiment_batch(batch_id)
+
+
+@app.get("/api/infrastructure/state")
+async def get_infrastructure_state() -> dict[str, Any]:
+    return await state.fetch_infrastructure_state()
+
+
+@app.get("/api/infrastructure/actions")
+async def get_infrastructure_actions() -> dict[str, Any]:
+    return await state.fetch_infrastructure_actions()
+
+
+@app.post("/api/infrastructure/mode")
+async def set_infrastructure_mode(payload: InfraModeUpdateRequest) -> dict[str, Any]:
+    return await state.set_infrastructure_mode(payload.mode)
+
+
+@app.post("/api/infrastructure/sync")
+async def sync_infrastructure() -> dict[str, Any]:
+    return await state.sync_infrastructure()
+
+
+@app.post("/api/infrastructure/execute")
+async def execute_infrastructure() -> dict[str, Any]:
+    return await state.execute_infrastructure()
+
+
+@app.post("/api/infrastructure/reset")
+async def reset_infrastructure() -> dict[str, Any]:
+    return await state.reset_infrastructure()

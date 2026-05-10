@@ -16,6 +16,14 @@ const strategicRecommendation = document.getElementById("strategicRecommendation
 const previewRecommendation = document.getElementById("previewRecommendation");
 const previewSaleButton = document.getElementById("previewSaleButton");
 const previewWeekdayButton = document.getElementById("previewWeekdayButton");
+const infrastructureState = document.getElementById("infrastructureState");
+const infrastructureActionsList = document.getElementById("infrastructureActionsList");
+const infraStatus = document.getElementById("infraStatus");
+const infraSimulateButton = document.getElementById("infraSimulateButton");
+const infraAwsButton = document.getElementById("infraAwsButton");
+const infraSyncButton = document.getElementById("infraSyncButton");
+const infraExecuteButton = document.getElementById("infraExecuteButton");
+const infraResetButton = document.getElementById("infraResetButton");
 const scenarioSelect = document.getElementById("scenarioSelect");
 const experimentModeSelect = document.getElementById("experimentModeSelect");
 const experimentRepeatCountSelect = document.getElementById("experimentRepeatCountSelect");
@@ -37,6 +45,7 @@ const chartTargets = {
   queueChart: document.getElementById("queueChart"),
   strategicBandChart: document.getElementById("strategicBandChart"),
   capacityChart: document.getElementById("capacityChart"),
+  infrastructureCapacityChart: document.getElementById("infrastructureCapacityChart"),
   comparisonLatencyChart: document.getElementById("comparisonLatencyChart"),
   comparisonThroughputChart: document.getElementById("comparisonThroughputChart"),
   experimentPressureChart: document.getElementById("experimentPressureChart"),
@@ -139,6 +148,59 @@ function renderRecommendationCard(target, title, payload) {
       <p><strong>Event Types</strong>: ${(strategic.event_types || []).join(", ") || "-"}</p>
     </article>
   `;
+}
+
+function renderInfrastructureState(infra) {
+  if (!infra) {
+    infrastructureState.innerHTML = '<div class="chart-empty">Infrastructure state unavailable.</div>';
+    return;
+  }
+
+  const plan = infra.pending_plan?.plan || null;
+  infrastructureState.innerHTML = `
+    <article class="strategic-card">
+      <h3>${infra.group_name || "ai-loadbalancer-workers"}</h3>
+      <p><strong>Mode</strong>: ${infra.mode || "-"}</p>
+      <p><strong>Provider</strong>: ${infra.provider || "-"}</p>
+      <p><strong>Current Instances</strong>: ${formatNumber(infra.current_instances)}</p>
+      <p><strong>Desired Instances</strong>: ${formatNumber(infra.desired_instances)}</p>
+      <p><strong>Pending Instances</strong>: ${formatNumber(infra.pending_instances)}</p>
+      <p><strong>Pending Scale Down</strong>: ${formatNumber(infra.pending_scale_down)}</p>
+      <p><strong>Cooldown</strong>: ${formatNumber(infra.cooldown_remaining_seconds)} s</p>
+      <p><strong>Last Action</strong>: ${infra.last_action || "-"}</p>
+      <p><strong>Pending Plan</strong>: ${plan ? `${plan.action} -> ${formatNumber(plan.execute_target_instances)}` : "-"}</p>
+    </article>
+  `;
+}
+
+function renderInfrastructureActions(actionsPayload) {
+  const actions = actionsPayload?.actions || [];
+  if (!actions.length) {
+    infrastructureActionsList.innerHTML = '<div class="chart-empty">No infrastructure actions recorded yet.</div>';
+    return;
+  }
+
+  infrastructureActionsList.innerHTML = actions
+    .slice(-6)
+    .reverse()
+    .map((entry) => {
+      const plan = entry.plan || {};
+      const after = entry.after || {};
+      return `
+        <article class="time-event-card">
+          <div>
+            <strong>${entry.action || "action"}</strong>
+            <p>${formatTimestamp(entry.timestamp)}</p>
+            <p>Desired ${formatNumber(after.desired_instances)} / Current ${formatNumber(after.current_instances)}</p>
+            ${plan.execute_target_instances !== undefined ? `<p>Plan target: ${formatNumber(plan.execute_target_instances)}</p>` : ""}
+          </div>
+          <div class="time-event-meta">
+            <span class="pill good">${entry.mode || "-"}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderLatestRunSummary(runPayload, executionPayload, artifactsPayload = null) {
@@ -604,6 +666,57 @@ async function applyTimePreset(preset) {
   await refreshAll();
 }
 
+async function setInfrastructureMode(mode) {
+  infraStatus.textContent = `Switching infrastructure mode to ${mode}...`;
+  const response = await fetch("/api/infrastructure/mode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) {
+    infraStatus.textContent = `Infrastructure mode change failed: ${await response.text()}`;
+    return;
+  }
+  infraStatus.textContent = `Infrastructure mode is now ${mode}.`;
+  await refreshAll();
+}
+
+async function syncInfrastructure() {
+  infraStatus.textContent = "Syncing infrastructure recommendation...";
+  const response = await fetch("/api/infrastructure/sync", { method: "POST" });
+  if (!response.ok) {
+    infraStatus.textContent = `Infrastructure sync failed: ${await response.text()}`;
+    return;
+  }
+  const payload = await response.json();
+  const action = payload.plan?.action || "hold";
+  infraStatus.textContent = `Infrastructure plan synced: ${action}.`;
+  await refreshAll();
+}
+
+async function executeInfrastructure() {
+  infraStatus.textContent = "Executing infrastructure plan...";
+  const response = await fetch("/api/infrastructure/execute", { method: "POST" });
+  if (!response.ok) {
+    infraStatus.textContent = `Infrastructure execute failed: ${await response.text()}`;
+    return;
+  }
+  const payload = await response.json();
+  infraStatus.textContent = `Infrastructure executed: ${payload.record?.action || "hold"}.`;
+  await refreshAll();
+}
+
+async function resetInfrastructure() {
+  infraStatus.textContent = "Resetting infrastructure state...";
+  const response = await fetch("/api/infrastructure/reset", { method: "POST" });
+  if (!response.ok) {
+    infraStatus.textContent = `Infrastructure reset failed: ${await response.text()}`;
+    return;
+  }
+  infraStatus.textContent = "Infrastructure state reset.";
+  await refreshAll();
+}
+
 async function loadExperimentScenarios() {
   const response = await fetch("/api/experiments/scenarios");
   if (!response.ok) {
@@ -797,7 +910,7 @@ function renderWorkers(workers) {
     )
     .join("");
 
-  document.querySelectorAll(".worker-action").forEach((button) => {
+  document.querySelectorAll("[data-action][data-worker]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (button.dataset.action === "fault") {
         await injectLatency(button.dataset.worker);
@@ -1133,13 +1246,32 @@ function renderCharts(historyPayload) {
       values: historyPoints.map((point) => point.summary?.strategic_target_workers ?? 0),
     },
   ], markers);
+
+  renderLineChart(chartTargets.infrastructureCapacityChart, "Infrastructure Capacity", labels, [
+    {
+      label: "Current Instances",
+      color: "#2059a8",
+      values: historyPoints.map((point) => point.summary?.infra_current_instances ?? 0),
+    },
+    {
+      label: "Desired Instances",
+      color: "#1d6b45",
+      values: historyPoints.map((point) => point.summary?.infra_desired_instances ?? 0),
+    },
+    {
+      label: "Pending Instances",
+      color: "#c6552d",
+      values: historyPoints.map((point) => point.summary?.infra_pending_instances ?? 0),
+    },
+  ], markers);
 }
 
 async function refreshAll() {
-  const [overviewResponse, historyResponse, recommendationResponse] = await Promise.all([
+  const [overviewResponse, historyResponse, recommendationResponse, infraActionsResponse] = await Promise.all([
     fetch("/api/overview"),
     fetch("/api/history"),
     fetch("/api/recommendations"),
+    fetch("/api/infrastructure/actions"),
   ]);
 
   if (!overviewResponse.ok) {
@@ -1154,11 +1286,17 @@ async function refreshAll() {
     modeStatus.textContent = `Recommendation refresh failed: ${await recommendationResponse.text()}`;
     return;
   }
+  if (!infraActionsResponse.ok) {
+    infraStatus.textContent = `Infrastructure action refresh failed: ${await infraActionsResponse.text()}`;
+    return;
+  }
 
   const overview = await overviewResponse.json();
   const historyPayload = await historyResponse.json();
   const recommendationPayload = await recommendationResponse.json();
+  const infraActionsPayload = await infraActionsResponse.json();
   const timeState = overview.control_plane.time || {};
+  const infraState = overview.control_plane.infrastructure || {};
 
   const mode = overview.control_plane.mode || "-";
   modeValue.textContent = mode;
@@ -1174,6 +1312,9 @@ async function refreshAll() {
   renderTimeEvents(historyPayload.points || []);
   renderCharts(historyPayload);
   renderRecommendationCard(strategicRecommendation, "Current Strategic Window", recommendationPayload);
+  renderInfrastructureState(infraState);
+  renderInfrastructureActions(infraActionsPayload);
+  infraStatus.textContent = `Infrastructure mode ${infraState.mode || "-"}; desired ${formatNumber(infraState.desired_instances)} current ${formatNumber(infraState.current_instances)}.`;
   modeStatus.textContent = `Last refresh: ${overview.generated_at || "unknown"}`;
 }
 
@@ -1198,6 +1339,11 @@ refreshButton.addEventListener("click", refreshAll);
 runExperimentButton.addEventListener("click", runExperiment);
 runBatchExperimentButton.addEventListener("click", runExperimentBatch);
 refreshComparisonButton.addEventListener("click", refreshExperimentComparison);
+infraSimulateButton.addEventListener("click", () => setInfrastructureMode("simulate"));
+infraAwsButton.addEventListener("click", () => setInfrastructureMode("aws_execute"));
+infraSyncButton.addEventListener("click", syncInfrastructure);
+infraExecuteButton.addEventListener("click", executeInfrastructure);
+infraResetButton.addEventListener("click", resetInfrastructure);
 previewSaleButton.addEventListener("click", () =>
   previewRecommendationWindow(
     {
@@ -1225,4 +1371,6 @@ loadExperimentScenarios();
 refreshAll();
 renderExperimentRunCharts(null, null);
 renderBatchAggregateSummary(null);
+renderInfrastructureState(null);
+renderInfrastructureActions(null);
 setInterval(refreshAll, 5000);
